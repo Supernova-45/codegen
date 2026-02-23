@@ -1,0 +1,32 @@
+experiment_name: mvp_mbpp
+seed: 42
+max_examples: 30
+shuffle: false
+
+dataset:
+  variants_path: data/mbpp_variants.jsonl
+  conditions:
+    - original
+    - incomplete
+    - ambiguous
+
+model:
+  base_url_env: CLARIFYCODE_BASE_URL
+  api_key_env: CLARIFYCODE_API_KEY
+  model_env: CLARIFYCODE_MODEL
+  temperature: 0.8
+  request_timeout_s: 90
+
+pipeline:
+  strategy: eig-tests
+  n_candidates: 6
+  tests_per_round: 6
+  k_max: 2
+  epsilon: 0.02
+  gamma: 0.95
+  run_reprompt: false
+  sandbox_timeout_s: 3
+
+output:
+  results_dir: results
+  output_file: latest.jsonl
