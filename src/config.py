@@ -38,6 +38,10 @@ class ExperimentConfig:
     shuffle: bool
     variants_path: str
     conditions: list[str]
+    mbppplus_enabled: bool
+    mbppplus_dataset: str
+    mbppplus_split: str
+    mbppplus_timeout_s: int
     model: ModelConfig
     pipeline: PipelineConfig
     results_dir: str
@@ -63,6 +67,12 @@ def load_config(path: str) -> ExperimentConfig:
     pipeline = raw["pipeline"]
     output = raw["output"]
     dataset = raw["dataset"]
+
+    mbppplus = dataset.get("mbppplus", {})
+    mbppplus_enabled = bool(mbppplus.get("enabled", False))
+    mbppplus_dataset = str(mbppplus.get("dataset", "evalplus/mbppplus"))
+    mbppplus_split = str(mbppplus.get("split", "test"))
+    mbppplus_timeout_s = int(mbppplus.get("timeout_s", max(10, int(pipeline["sandbox_timeout_s"]))))
 
     base_url_var = str(model["base_url_env"])
     api_key_var = str(model["api_key_env"])
@@ -93,6 +103,10 @@ def load_config(path: str) -> ExperimentConfig:
         shuffle=bool(raw["shuffle"]),
         variants_path=str(dataset["variants_path"]),
         conditions=list(dataset["conditions"]),
+        mbppplus_enabled=mbppplus_enabled,
+        mbppplus_dataset=mbppplus_dataset,
+        mbppplus_split=mbppplus_split,
+        mbppplus_timeout_s=mbppplus_timeout_s,
         model=model_cfg,
         pipeline=pipe_cfg,
         results_dir=str(output["results_dir"]),

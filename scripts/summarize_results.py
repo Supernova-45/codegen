@@ -11,7 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from eval.metrics import aggregate_pass_at_1, average_questions
+from eval.metrics import aggregate_optional_boolean_metric, aggregate_pass_at_1, average_questions
 
 
 def read_rows(path: Path) -> list[dict]:
@@ -85,11 +85,16 @@ def overall_strategy_summary(rows: list[dict]) -> list[dict]:
             int(x.get("total_prompt_tokens", 0)) + int(x.get("total_completion_tokens", 0))
             for x in items
         ]
+        mbppplus_vals = [x.get("mbppplus_pass_at_1") for x in items if x.get("mbppplus_pass_at_1") is not None]
         out.append(
             {
                 "strategy": strategy,
                 "n": len(items),
                 "pass_at_1": sum(pass_vals) / len(pass_vals),
+                "mbppplus_pass_at_1": (sum(1 if x else 0 for x in mbppplus_vals) / len(mbppplus_vals))
+                if mbppplus_vals
+                else None,
+                "mbppplus_n": len(mbppplus_vals),
                 "avg_questions": sum(q_vals) / len(q_vals),
                 "avg_total_tokens": statistics.mean(tok_vals),
             }
@@ -97,20 +102,28 @@ def overall_strategy_summary(rows: list[dict]) -> list[dict]:
     return out
 
 
-def write_markdown_table(path: Path, overall: list[dict], by_condition: list[dict]) -> None:
+def write_markdown_table(
+    path: Path,
+    overall: list[dict],
+    by_condition: list[dict],
+    mbppplus_by_condition: list[dict],
+) -> None:
     lines: list[str] = []
     lines.append("# Strategy Comparison")
     lines.append("")
     lines.append("## Overall")
     lines.append("")
-    lines.append("| strategy | n | pass@1 | avg_questions | avg_total_tokens |")
-    lines.append("|---|---:|---:|---:|---:|")
+    lines.append("| strategy | n | pass@1 | MBPP+ pass@1 | MBPP+ n | avg_questions | avg_total_tokens |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|")
     for row in overall:
+        mbppplus_display = "n/a" if row["mbppplus_pass_at_1"] is None else f"{row['mbppplus_pass_at_1']:.3f}"
         lines.append(
-            "| {strategy} | {n} | {p:.3f} | {q:.3f} | {t:.1f} |".format(
+            "| {strategy} | {n} | {p:.3f} | {mp} | {mn} | {q:.3f} | {t:.1f} |".format(
                 strategy=row["strategy"],
                 n=row["n"],
                 p=row["pass_at_1"],
+                mp=mbppplus_display,
+                mn=row["mbppplus_n"],
                 q=row["avg_questions"],
                 t=row["avg_total_tokens"],
             )
@@ -127,6 +140,20 @@ def write_markdown_table(path: Path, overall: list[dict], by_condition: list[dic
                 strategy=row["strategy"],
                 n=row["n"],
                 p=row["pass_at_1"],
+            )
+        )
+    lines.append("")
+    lines.append("## MBPP+ By Condition")
+    lines.append("")
+    lines.append("| condition | strategy | n | MBPP+ pass@1 |")
+    lines.append("|---|---|---:|---:|")
+    for row in mbppplus_by_condition:
+        lines.append(
+            "| {condition} | {strategy} | {n} | {p:.3f} |".format(
+                condition=row["condition"],
+                strategy=row["strategy"],
+                n=row["n"],
+                p=row["mbppplus_pass_at_1"],
             )
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -148,16 +175,23 @@ def main() -> None:
     by_k = pass_at_1_vs_k(rows)
     tok = token_summary(rows)
     overall = overall_strategy_summary(rows)
+    mbppplus_by_condition = aggregate_optional_boolean_metric(
+        rows,
+        metric_key="mbppplus_pass_at_1",
+        output_key="mbppplus_pass_at_1",
+    )
 
     write_csv(out_dir / "summary_pass_at_1.csv", p1)
+    write_csv(out_dir / "summary_mbppplus_pass_at_1.csv", mbppplus_by_condition)
     write_csv(out_dir / "summary_questions.csv", q)
     write_csv(out_dir / "summary_pass_at_1_vs_k.csv", by_k)
     write_csv(out_dir / "summary_tokens.csv", tok)
     write_csv(out_dir / "summary_overall_strategy.csv", overall)
-    write_markdown_table(out_dir / "comparison_table.md", overall, p1)
+    write_markdown_table(out_dir / "comparison_table.md", overall, p1, mbppplus_by_condition)
 
     print("Wrote:")
     print(f"- {out_dir / 'summary_pass_at_1.csv'}")
+    print(f"- {out_dir / 'summary_mbppplus_pass_at_1.csv'}")
     print(f"- {out_dir / 'summary_questions.csv'}")
     print(f"- {out_dir / 'summary_pass_at_1_vs_k.csv'}")
     print(f"- {out_dir / 'summary_tokens.csv'}")

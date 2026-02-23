@@ -9,6 +9,11 @@ dataset:
     - original
     - incomplete
     - ambiguous
+  mbppplus:
+    enabled: true
+    dataset: evalplus/mbppplus
+    split: test
+    timeout_s: 15
 
 model:
   base_url_env: CLARIFYCODE_BASE_URL

@@ -1,8 +1,8 @@
-# ClarifyCode MVP
+# Twenty Questions for Code
 
-Clean-room MVP for interactive code generation with binary unit-test clarification.
+Interactive code generation with binary unit-test clarification.
 
-This project implements the core loop described in `proposal.md`:
+This project implements the loop described in `proposal.md`:
 - sample candidate programs
 - ask informative yes/no unit-test questions
 - update a Bayesian particle posterior
@@ -10,8 +10,9 @@ This project implements the core loop described in `proposal.md`:
 
 ## Scope
 
-Current MVP supports:
+Currently supports:
 - MBPP dataset
+- Optional MBPP+ strict re-scoring (`evalplus/mbppplus`)
 - prompt conditions: `original`, `incomplete`, `ambiguous`
 - strategies: `one-shot`, `random-tests`, `eig-tests`
 - OpenAI-compatible chat-completions backend
@@ -78,6 +79,9 @@ python scripts/prepare_mbpp_variants.py \
 python scripts/run_experiment.py --config configs/mvp_mbpp.yaml
 ```
 
+This keeps optimization on current hidden tests and, when enabled in config, re-scores the
+same `final_code` on MBPP+ for stricter reporting.
+
 ## Summarize Results
 
 ```bash
@@ -85,6 +89,9 @@ python scripts/summarize_results.py \
   --results results/latest.jsonl \
   --output-dir results
 ```
+
+Additional MBPP+ summary output:
+- `results/summary_mbppplus_pass_at_1.csv`
 
 ## Notes
 

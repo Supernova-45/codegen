@@ -14,6 +14,7 @@ ALLOWED_IMPORTS = {
     "functools",
     "string",
     "bisect",
+    "numpy",
 }
 
 
@@ -83,3 +84,19 @@ def run_tests(code: str, tests: list[str], timeout_s: int) -> tuple[int, int, li
         else:
             errors.append(err)
     return passed, len(tests), errors
+
+
+def run_test_script(code: str, script: str, timeout_s: int) -> tuple[bool, str]:
+    q: mp.Queue = mp.Queue()
+    proc = mp.Process(target=_run_in_child, args=(code, script, q))
+    proc.start()
+    proc.join(timeout_s)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join()
+        return False, "Timeout"
+    try:
+        out = q.get_nowait()
+    except queue.Empty:
+        return False, "NoResult"
+    return bool(out["ok"]), str(out["error"])

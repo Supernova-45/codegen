@@ -27,6 +27,8 @@ class ProblemResult:
     eval_passed: int
     eval_total: int
     eval_errors: list[str]
+    mbppplus_pass_at_1: bool | None
+    mbppplus_error: str | None
     interaction_trace: list[dict[str, Any]]
     model_trace: list[dict[str, Any]]
 
@@ -44,6 +46,8 @@ class ProblemResult:
             "eval_passed": self.eval_passed,
             "eval_total": self.eval_total,
             "eval_errors": self.eval_errors,
+            "mbppplus_pass_at_1": self.mbppplus_pass_at_1,
+            "mbppplus_error": self.mbppplus_error,
             "interaction_trace": self.interaction_trace,
             "model_trace": self.model_trace,
         }
@@ -94,6 +98,8 @@ def run_problem(
             eval_passed=passed,
             eval_total=total,
             eval_errors=errors,
+            mbppplus_pass_at_1=None,
+            mbppplus_error=None,
             interaction_trace=interaction_trace,
             model_trace=model.get_trace(),
         )
@@ -208,6 +214,8 @@ def run_problem(
         eval_passed=passed,
         eval_total=total,
         eval_errors=errors,
+        mbppplus_pass_at_1=None,
+        mbppplus_error=None,
         interaction_trace=interaction_trace,
         model_trace=model.get_trace(),
     )

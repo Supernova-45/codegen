@@ -41,3 +41,30 @@ def average_questions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
     out.sort(key=lambda x: (x["condition"], x["strategy"]))
     return out
+
+
+def aggregate_optional_boolean_metric(
+    rows: list[dict[str, Any]],
+    metric_key: str,
+    output_key: str,
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for row in rows:
+        value = row.get(metric_key)
+        if value is None:
+            continue
+        key = (row["condition"], row["strategy"])
+        grouped[key].append(1 if bool(value) else 0)
+
+    summary: list[dict[str, Any]] = []
+    for (condition, strategy), vals in grouped.items():
+        summary.append(
+            {
+                "condition": condition,
+                "strategy": strategy,
+                "n": len(vals),
+                output_key: sum(vals) / max(1, len(vals)),
+            }
+        )
+    summary.sort(key=lambda x: (x["condition"], x["strategy"]))
+    return summary
