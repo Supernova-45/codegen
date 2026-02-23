@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 import random
 import re
@@ -161,6 +162,10 @@ class OpenAICompatibleClient:
                         "Given the task, propose candidate binary clarification tests.\n"
                         "Return exactly one assert per line.\n"
                         "No prose, no numbering, no markdown.\n"
+                        "Each assert must be standalone and executable by itself.\n"
+                        "Use only Python literals in inputs (ints, floats, strings, bools, lists, tuples, dicts).\n"
+                        "Do not use helper variables, random values, external files, or extra function calls.\n"
+                        "Do not reference any names except the target function.\n"
                         f"Task:\n{prompt}\n\n"
                         f"Function under test: {function_name or 'unknown'}\n"
                         f"Already asked tests:\n{already}\n\n"
@@ -177,7 +182,8 @@ class OpenAICompatibleClient:
         )
         lines = [line.strip() for line in txt.splitlines()]
         asserts = [line for line in lines if line.startswith("assert ")]
-        return asserts[:n_tests], usage
+        filtered = _filter_assert_lines(asserts, function_name=function_name)
+        return filtered[:n_tests], usage
 
 
 def extract_python(text: str) -> str:
@@ -188,3 +194,29 @@ def extract_python(text: str) -> str:
     if block2:
         return block2[0].strip()
     return text.strip()
+
+
+def _filter_assert_lines(lines: list[str], function_name: str | None) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    fn_token = f"{function_name}(" if function_name else None
+    for line in lines:
+        if line in seen:
+            continue
+        if fn_token and fn_token not in line:
+            continue
+        if not _is_valid_assert_line(line):
+            continue
+        out.append(line)
+        seen.add(line)
+    return out
+
+
+def _is_valid_assert_line(line: str) -> bool:
+    try:
+        tree = ast.parse(line, mode="exec")
+    except SyntaxError:
+        return False
+    if len(tree.body) != 1:
+        return False
+    return isinstance(tree.body[0], ast.Assert)

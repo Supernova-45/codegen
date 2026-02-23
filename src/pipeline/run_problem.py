@@ -126,7 +126,10 @@ def run_problem(
         usage.prompt_tokens += u_tests.prompt_tokens
         usage.completion_tokens += u_tests.completion_tokens
         valid_tests, outcomes_by_test, test_eval_logs = _evaluate_test_matrix(
-            test_candidates, candidates, cfg.sandbox_timeout_s
+            test_candidates,
+            candidates,
+            cfg.sandbox_timeout_s,
+            min_coverage=cfg.min_valid_candidate_coverage,
         )
         round_log: dict[str, Any] = {
             "round": round_idx + 1,
@@ -150,7 +153,8 @@ def run_problem(
         selected_test = valid_tests[idx]
         outcomes = outcomes_by_test[idx]
 
-        if strategy == "eig-tests":
+        must_ask_for_minimum = len(chosen_tests) < cfg.min_questions_if_valid
+        if strategy == "eig-tests" and not must_ask_for_minimum:
             p_current = posterior.map_confidence()
             p_next = posterior.expected_map_after_question(outcomes, cfg.epsilon)
             if not should_ask(p_current, p_next, cfg.gamma):
@@ -225,6 +229,7 @@ def _evaluate_test_matrix(
     tests: list[str],
     candidates: list[str],
     timeout_s: int,
+    min_coverage: float,
 ) -> tuple[list[str], list[list[bool]], list[dict[str, Any]]]:
     valid_tests: list[str] = []
     matrix: list[list[bool]] = []
@@ -234,6 +239,7 @@ def _evaluate_test_matrix(
         valid = True
         invalid_reason = ""
         candidate_checks: list[dict[str, Any]] = []
+        deterministic_runs = 0
         for code in candidates:
             ok1, err1 = run_assertion(code, test, timeout_s)
             ok2, err2 = run_assertion(code, test, timeout_s)
@@ -254,19 +260,27 @@ def _evaluate_test_matrix(
                 invalid_reason = "non_deterministic"
                 break
             if not ok1 and "AssertionError" not in err1:
-                valid = False
-                invalid_reason = "runtime_error_on_candidate"
-                break
+                # Stable runtime failures still provide discrimination signal:
+                # candidates that crash on this behavior are effectively "False".
+                deterministic_runs += 1
+                outcomes.append(False)
+                continue
+            deterministic_runs += 1
             outcomes.append(ok1)
-        if valid and outcomes:
+        coverage = deterministic_runs / max(1, len(candidates))
+        if valid and outcomes and coverage >= min_coverage:
             valid_tests.append(test)
             matrix.append(outcomes)
+        elif valid and outcomes:
+            valid = False
+            invalid_reason = "low_candidate_coverage"
         logs.append(
             {
                 "test": test,
                 "valid": valid and bool(outcomes),
                 "invalid_reason": invalid_reason,
                 "outcomes_if_valid": outcomes if valid else [],
+                "coverage": coverage,
                 "candidate_checks": candidate_checks,
             }
         )

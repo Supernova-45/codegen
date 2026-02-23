@@ -82,6 +82,11 @@ python scripts/run_experiment.py --config configs/mvp_mbpp.yaml
 This keeps optimization on current hidden tests and, when enabled in config, re-scores the
 same `final_code` on MBPP+ for stricter reporting.
 
+EIG tuning knobs in `pipeline`:
+- `gamma`: ask-vs-submit threshold (lower asks more often)
+- `min_questions_if_valid`: force at least this many asks when valid tests exist
+- `min_valid_candidate_coverage`: fraction of candidate programs a generated test must execute on
+
 ## Summarize Results
 
 ```bash
@@ -92,8 +97,3 @@ python scripts/summarize_results.py \
 
 Additional MBPP+ summary output:
 - `results/summary_mbppplus_pass_at_1.csv`
-
-## Notes
-
-- API keys are read from env vars only. Never hardcode secrets.
-- Sandbox execution is best-effort for MVP; use isolated containers for stronger safety in production.

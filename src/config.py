@@ -26,6 +26,8 @@ class PipelineConfig:
     k_max: int
     epsilon: float
     gamma: float
+    min_questions_if_valid: int
+    min_valid_candidate_coverage: float
     run_reprompt: bool
     sandbox_timeout_s: int
 
@@ -92,6 +94,8 @@ def load_config(path: str) -> ExperimentConfig:
         k_max=int(pipeline["k_max"]),
         epsilon=float(pipeline["epsilon"]),
         gamma=float(pipeline["gamma"]),
+        min_questions_if_valid=int(pipeline.get("min_questions_if_valid", 1)),
+        min_valid_candidate_coverage=float(pipeline.get("min_valid_candidate_coverage", 0.6)),
         run_reprompt=bool(pipeline["run_reprompt"]),
         sandbox_timeout_s=int(pipeline["sandbox_timeout_s"]),
     )

@@ -28,7 +28,9 @@ pipeline:
   tests_per_round: 6
   k_max: 2
   epsilon: 0.02
-  gamma: 0.95
+  gamma: 0.85
+  min_questions_if_valid: 1
+  min_valid_candidate_coverage: 0.6
   run_reprompt: false
   sandbox_timeout_s: 3
 
