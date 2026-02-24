@@ -1,6 +1,3 @@
-battleship/
-Robustness-of-LLMs-to-prompt-imperfections/
-TiCoder/
 .venv/
 __pycache__/
 *.pyc
