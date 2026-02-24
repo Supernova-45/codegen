@@ -75,8 +75,10 @@ def token_summary(rows: list[dict]) -> list[dict]:
 
 def eig_diagnostics(rows: list[dict]) -> list[dict]:
     grouped: dict[tuple[str, str], dict[str, float]] = {}
+    counts_by_key: dict[tuple[str, str], int] = {}
     for row in rows:
         key = (row["condition"], row["strategy"])
+        counts_by_key[key] = counts_by_key.get(key, 0) + 1
         grouped.setdefault(
             key,
             {
@@ -86,12 +88,31 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 "sum_selected_score": 0.0,
                 "zero_score_selected": 0.0,
                 "filtered_non_discriminative": 0.0,
+                "filtered_universal_runtime_error": 0.0,
                 "filtered_signature_mismatch": 0.0,
                 "filter_assert_lines": 0.0,
                 "filter_accepted": 0.0,
+                "type_errors": 0.0,
+                "noresults": 0.0,
+                "process_crashes": 0.0,
+                "adapter_applied_count": 0.0,
+                "adapter_success_count": 0.0,
             },
         )
         stats = grouped[key]
+        adapter_info = row.get("adapter_info", {})
+        if adapter_info.get("adapter_applied"):
+            stats["adapter_applied_count"] += 1
+        if adapter_info.get("adapter_success"):
+            stats["adapter_success_count"] += 1
+        for err in row.get("eval_errors", []):
+            err_s = str(err)
+            if "TypeError" in err_s:
+                stats["type_errors"] += 1
+            if "NoResult" in err_s:
+                stats["noresults"] += 1
+            if "ProcessCrashed" in err_s:
+                stats["process_crashes"] += 1
         for step in row.get("interaction_trace", []):
             if "round" not in step:
                 continue
@@ -101,6 +122,8 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
             for tv in test_validation:
                 if tv.get("invalid_reason") == "non_discriminative":
                     stats["filtered_non_discriminative"] += 1
+                if tv.get("invalid_reason") == "universal_runtime_error":
+                    stats["filtered_universal_runtime_error"] += 1
             if step.get("decision") == "ask_and_update":
                 stats["selected_tests"] += 1
                 sel_score = step.get("selected_test_score")
@@ -118,6 +141,7 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
     for (condition, strategy), s in sorted(grouped.items()):
         selected = max(1.0, s["selected_tests"])
         asserted = max(1.0, s["filter_assert_lines"])
+        run_count = max(1.0, float(counts_by_key.get((condition, strategy), 0)))
         out.append(
             {
                 "condition": condition,
@@ -128,9 +152,15 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 "avg_selected_eig_score": s["sum_selected_score"] / selected,
                 "selected_zero_score_frac": s["zero_score_selected"] / selected,
                 "filtered_non_discriminative": int(s["filtered_non_discriminative"]),
+                "filtered_universal_runtime_error": int(s["filtered_universal_runtime_error"]),
                 "filtered_signature_mismatch": int(s["filtered_signature_mismatch"]),
                 "signature_mismatch_rate": s["filtered_signature_mismatch"] / asserted,
                 "accepted_assert_rate": s["filter_accepted"] / asserted,
+                "adapter_applied_rate": s["adapter_applied_count"] / run_count,
+                "adapter_success_rate": s["adapter_success_count"] / run_count,
+                "type_error_rate": s["type_errors"] / run_count,
+                "noresult_rate": s["noresults"] / run_count,
+                "process_crash_rate": s["process_crashes"] / run_count,
             }
         )
     return out

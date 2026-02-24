@@ -88,6 +88,8 @@ EIG tuning knobs in `pipeline`:
 - `min_valid_candidate_coverage`: fraction of candidate programs a generated test must execute on
 - `min_eig_score`: minimum EIG score required before asking a clarification test
 - `max_test_regen_attempts`: retries for generating stronger clarification tests if scores are too low
+- `eval_with_adapter`: evaluate with compatibility wrapper so correct logic can pass despite naming/signature variance
+- `eig_questions_per_round`: number of top-ranked EIG questions asked each round (no diversity constraint)
 
 ## Summarize Results
 

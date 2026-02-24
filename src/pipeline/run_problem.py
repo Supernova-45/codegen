@@ -6,6 +6,7 @@ from typing import Any
 
 from config import PipelineConfig
 from data.mbpp_loader import MBPPTask, infer_signature_hint
+from execution.adapter import build_effective_code
 from execution.sandbox import run_assertion, run_tests
 from models.openai_compatible import OpenAICompatibleClient, Usage
 from posterior.particle_posterior import ParticlePosterior
@@ -27,6 +28,7 @@ class ProblemResult:
     eval_passed: int
     eval_total: int
     eval_errors: list[str]
+    adapter_info: dict[str, Any]
     mbppplus_pass_at_1: bool | None
     mbppplus_error: str | None
     interaction_trace: list[dict[str, Any]]
@@ -46,6 +48,7 @@ class ProblemResult:
             "eval_passed": self.eval_passed,
             "eval_total": self.eval_total,
             "eval_errors": self.eval_errors,
+            "adapter_info": self.adapter_info,
             "mbppplus_pass_at_1": self.mbppplus_pass_at_1,
             "mbppplus_error": self.mbppplus_error,
             "interaction_trace": self.interaction_trace,
@@ -81,7 +84,13 @@ def run_problem(
         usage.prompt_tokens += u.prompt_tokens
         usage.completion_tokens += u.completion_tokens
         final_code = code_list[0]
-        passed, total, errors = run_tests(final_code, task.hidden_tests, cfg.sandbox_timeout_s)
+        effective_code, adapter_info = build_effective_code(
+            final_code,
+            expected_function_name=task.function_name,
+            expected_arity=expected_arity,
+            enabled=cfg.eval_with_adapter,
+        )
+        passed, total, errors = run_tests(effective_code, task.hidden_tests, cfg.sandbox_timeout_s)
         interaction_trace.append(
             {
                 "step": "one_shot_generation",
@@ -89,6 +98,7 @@ def run_problem(
                 "function_name": task.function_name,
                 "candidate_count": 1,
                 "selected_code": final_code,
+                "adapter_info": adapter_info.to_dict(),
             }
         )
         return ProblemResult(
@@ -104,6 +114,7 @@ def run_problem(
             eval_passed=passed,
             eval_total=total,
             eval_errors=errors,
+            adapter_info=adapter_info.to_dict(),
             mbppplus_pass_at_1=None,
             mbppplus_error=None,
             interaction_trace=interaction_trace,
@@ -119,6 +130,17 @@ def run_problem(
     )
     usage.prompt_tokens += u_codes.prompt_tokens
     usage.completion_tokens += u_codes.completion_tokens
+    candidate_adapters: list[dict[str, Any]] = []
+    effective_candidates: list[str] = []
+    for code in candidates:
+        effective, adapter_info = build_effective_code(
+            code,
+            expected_function_name=task.function_name,
+            expected_arity=expected_arity,
+            enabled=cfg.eval_with_adapter,
+        )
+        effective_candidates.append(effective)
+        candidate_adapters.append(adapter_info.to_dict())
     posterior = ParticlePosterior.uniform(candidates)
     asked: list[tuple[str, bool]] = []
     chosen_tests: list[dict[str, Any]] = []
@@ -144,7 +166,7 @@ def run_problem(
             usage.completion_tokens += u_tests.completion_tokens
             valid_tests, outcomes_by_test, test_eval_logs = _evaluate_test_matrix(
                 test_candidates,
-                candidates,
+                effective_candidates,
                 cfg.sandbox_timeout_s,
                 min_coverage=cfg.min_valid_candidate_coverage,
                 filter_non_discriminative=cfg.filter_non_discriminative,
@@ -177,6 +199,7 @@ def run_problem(
             "filter_non_discriminative": cfg.filter_non_discriminative,
             "test_generation_stats": generation_stats,
             "regen_attempts_used": regen_count,
+            "candidate_adapter_info": candidate_adapters,
         }
         if not valid_tests:
             round_log["decision"] = "no_valid_tests_stop"
@@ -184,55 +207,64 @@ def run_problem(
             break
 
         if strategy == "random-tests":
-            idx = rng.randrange(len(valid_tests))
             scores = []
+            selected_indices = [rng.randrange(len(valid_tests))]
         else:
-            idx, scores = select_max_eig(valid_tests, outcomes_by_test, posterior, cfg.epsilon)
-            if scores and eig_score_floor is not None and max(scores) < eig_score_floor:
-                round_log["decision"] = "low_eig_score_stop"
-                round_log["max_eig_score"] = max(scores)
-                round_log["eig_score_floor"] = eig_score_floor
-                interaction_trace.append(round_log)
-                break
+            _, scores = select_max_eig(valid_tests, outcomes_by_test, posterior, cfg.epsilon)
+            order = sorted(range(len(valid_tests)), key=lambda i: scores[i], reverse=True)
+            selected_indices = order[: max(1, cfg.eig_questions_per_round)]
 
-        selected_test = valid_tests[idx]
-        outcomes = outcomes_by_test[idx]
+        round_log["asked_in_round"] = []
+        stop_after_round = False
+        for idx in selected_indices:
+            selected_test = valid_tests[idx]
+            outcomes = outcomes_by_test[idx]
+            selected_score = scores[idx] if scores else None
 
-        must_ask_for_minimum = len(chosen_tests) < cfg.min_questions_if_valid
-        if strategy == "eig-tests" and not must_ask_for_minimum:
             p_current = posterior.map_confidence()
             p_next = posterior.expected_map_after_question(outcomes, cfg.epsilon)
-            if not should_ask(p_current, p_next, cfg.gamma):
-                round_log["selected_test"] = selected_test
-                round_log["selected_test_score"] = scores[idx] if scores else None
-                round_log["map_before"] = p_current
-                round_log["map_expected_after"] = p_next
-                round_log["decision"] = "submit_without_asking"
-                interaction_trace.append(round_log)
+            if len(chosen_tests) >= cfg.k_max:
+                stop_after_round = True
                 break
-        else:
-            p_current = posterior.map_confidence()
-            p_next = p_current
 
-        observed, _ = run_assertion(task.oracle_code, selected_test, cfg.sandbox_timeout_s)
-        posterior.update(outcomes, observed, cfg.epsilon)
-        asked.append((selected_test, observed))
-        chosen_tests.append(
-            {
-                "test": selected_test,
-                "observed": observed,
-                "map_before": p_current,
-                "map_expected_after": p_next,
-                "score": scores[idx] if scores else None,
-            }
-        )
-        round_log["selected_test"] = selected_test
-        round_log["selected_test_score"] = scores[idx] if scores else None
-        round_log["map_before"] = p_current
-        round_log["map_expected_after"] = p_next
-        round_log["oracle_observed"] = observed
-        round_log["decision"] = "ask_and_update"
+            observed, _ = run_assertion(task.oracle_code, selected_test, cfg.sandbox_timeout_s)
+            posterior.update(outcomes, observed, cfg.epsilon)
+            asked.append((selected_test, observed))
+            chosen_tests.append(
+                {
+                    "test": selected_test,
+                    "observed": observed,
+                    "map_before": p_current,
+                    "map_expected_after": p_next,
+                    "score": selected_score,
+                }
+            )
+            round_log["asked_in_round"].append(
+                {
+                    "test": selected_test,
+                    "score": selected_score,
+                    "map_before": p_current,
+                    "map_expected_after": p_next,
+                    "oracle_observed": observed,
+                }
+            )
+
+        if round_log["asked_in_round"]:
+            first = round_log["asked_in_round"][0]
+            round_log["selected_test"] = first["test"]
+            round_log["selected_test_score"] = first["score"]
+            round_log["map_before"] = first["map_before"]
+            round_log["map_expected_after"] = first["map_expected_after"]
+            round_log["oracle_observed"] = first["oracle_observed"]
+            if "decision" not in round_log:
+                round_log["decision"] = "ask_and_update"
+        elif strategy == "eig-tests":
+            round_log["decision"] = "submit_without_asking"
+            stop_after_round = True
+
         interaction_trace.append(round_log)
+        if stop_after_round:
+            break
 
     if cfg.run_reprompt and asked:
         constraints = [(t, a) for t, a in asked]
@@ -250,7 +282,13 @@ def run_problem(
     else:
         final_code = candidates[posterior.map_index()]
 
-    passed, total, errors = run_tests(final_code, task.hidden_tests, cfg.sandbox_timeout_s)
+    effective_final_code, final_adapter_info = build_effective_code(
+        final_code,
+        expected_function_name=task.function_name,
+        expected_arity=expected_arity,
+        enabled=cfg.eval_with_adapter,
+    )
+    passed, total, errors = run_tests(effective_final_code, task.hidden_tests, cfg.sandbox_timeout_s)
     return ProblemResult(
         task_id=task.task_id,
         condition=task.condition,
@@ -264,6 +302,7 @@ def run_problem(
         eval_passed=passed,
         eval_total=total,
         eval_errors=errors,
+        adapter_info=final_adapter_info.to_dict(),
         mbppplus_pass_at_1=None,
         mbppplus_error=None,
         interaction_trace=interaction_trace,
@@ -287,6 +326,7 @@ def _evaluate_test_matrix(
         invalid_reason = ""
         candidate_checks: list[dict[str, Any]] = []
         deterministic_runs = 0
+        runtime_error_runs = 0
         for code in candidates:
             ok1, err1 = run_assertion(code, test, timeout_s)
             ok2, err2 = run_assertion(code, test, timeout_s)
@@ -309,6 +349,7 @@ def _evaluate_test_matrix(
             if not ok1 and "AssertionError" not in err1:
                 # Stable runtime failures still provide discrimination signal:
                 # candidates that crash on this behavior are effectively "False".
+                runtime_error_runs += 1
                 deterministic_runs += 1
                 outcomes.append(False)
                 continue
@@ -316,17 +357,21 @@ def _evaluate_test_matrix(
             outcomes.append(ok1)
         coverage = deterministic_runs / max(1, len(candidates))
         non_discriminative = bool(outcomes) and (all(outcomes) or not any(outcomes))
+        universal_runtime_error = runtime_error_runs == len(candidates) and len(candidates) > 0
         if (
             valid
             and outcomes
             and coverage >= min_coverage
+            and not universal_runtime_error
             and (not filter_non_discriminative or not non_discriminative)
         ):
             valid_tests.append(test)
             matrix.append(outcomes)
         elif valid and outcomes:
             valid = False
-            if non_discriminative:
+            if universal_runtime_error:
+                invalid_reason = "universal_runtime_error"
+            elif non_discriminative:
                 invalid_reason = "non_discriminative"
             else:
                 invalid_reason = "low_candidate_coverage"
@@ -337,6 +382,7 @@ def _evaluate_test_matrix(
                 "invalid_reason": invalid_reason,
                 "outcomes_if_valid": outcomes if valid else [],
                 "coverage": coverage,
+                "runtime_error_runs": runtime_error_runs,
                 "candidate_checks": candidate_checks,
             }
         )

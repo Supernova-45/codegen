@@ -32,6 +32,8 @@ class PipelineConfig:
     filter_non_discriminative: bool
     min_eig_score: float
     max_test_regen_attempts: int
+    eig_questions_per_round: int
+    eval_with_adapter: bool
     run_reprompt: bool
     sandbox_timeout_s: int
 
@@ -104,6 +106,8 @@ def load_config(path: str) -> ExperimentConfig:
         filter_non_discriminative=bool(pipeline.get("filter_non_discriminative", True)),
         min_eig_score=float(pipeline.get("min_eig_score", 0.02)),
         max_test_regen_attempts=int(pipeline.get("max_test_regen_attempts", 1)),
+        eig_questions_per_round=int(pipeline.get("eig_questions_per_round", 2)),
+        eval_with_adapter=bool(pipeline.get("eval_with_adapter", True)),
         run_reprompt=bool(pipeline["run_reprompt"]),
         sandbox_timeout_s=int(pipeline["sandbox_timeout_s"]),
     )

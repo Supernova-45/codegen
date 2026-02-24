@@ -1,0 +1,10 @@
+condition,strategy,rounds,avg_generated_tests_per_round,selected_tests,avg_selected_eig_score,selected_zero_score_frac,filtered_non_discriminative,filtered_universal_runtime_error,filtered_signature_mismatch,signature_mismatch_rate,accepted_assert_rate,adapter_applied_rate,adapter_success_rate,type_error_rate,noresult_rate,process_crash_rate
+ambiguous,eig-tests,17,5.647058823529412,8,0.7668713220935502,0.0,45,6,0,0.0,1.0,1.0,1.0,0.6,0.0,0.0
+ambiguous,one-shot,0,0.0,0,0.0,0.0,0,0,0,0.0,0.0,1.0,1.0,0.6,0.0,0.0
+ambiguous,random-tests,27,5.925925925925926,25,0.0,0.0,60,9,0,0.0,0.9815950920245399,1.0,1.0,0.6,0.0,0.0
+incomplete,eig-tests,15,4.733333333333333,5,0.7320071269344639,0.0,26,12,0,0.0,0.9895833333333334,1.0,1.0,0.8,0.0,0.0
+incomplete,one-shot,0,0.0,0,0.0,0.0,0,0,0,0.0,0.0,1.0,1.0,0.6,0.0,0.0
+incomplete,random-tests,22,5.863636363636363,18,0.0,0.0,46,20,0,0.0,0.9772727272727273,1.0,1.0,0.4,0.0,0.0
+original,eig-tests,13,5.0,3,0.6452774879436992,0.0,36,4,6,0.07142857142857142,0.9166666666666666,1.0,1.0,0.0,0.0,0.0
+original,one-shot,0,0.0,0,0.0,0.0,0,0,0,0.0,0.0,1.0,1.0,0.2,0.0,0.0
+original,random-tests,20,5.3,15,0.0,0.0,38,8,6,0.05263157894736842,0.9298245614035088,1.0,1.0,0.3,0.0,0.0

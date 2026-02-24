@@ -30,17 +30,25 @@ def _run_in_child(code: str, test: str, q: mp.Queue) -> None:
         "abs": abs,
         "all": all,
         "any": any,
+        "bin": bin,
         "bool": bool,
+        "chr": chr,
         "dict": dict,
+        "divmod": divmod,
         "enumerate": enumerate,
         "float": float,
+        "hex": hex,
         "int": int,
         "len": len,
         "list": list,
         "max": max,
         "min": min,
+        "oct": oct,
+        "ord": ord,
         "print": print,
+        "pow": pow,
         "range": range,
+        "round": round,
         "set": set,
         "sorted": sorted,
         "str": str,
@@ -54,7 +62,7 @@ def _run_in_child(code: str, test: str, q: mp.Queue) -> None:
         exec(code, env, env)
         exec(test, env, env)
         q.put({"ok": True, "error": ""})
-    except Exception as exc:  # noqa: BLE001
+    except BaseException as exc:  # noqa: BLE001
         q.put({"ok": False, "error": repr(exc)})
 
 
@@ -67,11 +75,15 @@ def run_assertion(code: str, assertion: str, timeout_s: int) -> tuple[bool, str]
         proc.terminate()
         proc.join()
         return False, "Timeout"
-    try:
-        out = q.get_nowait()
-    except queue.Empty:
-        return False, "NoResult"
-    return bool(out["ok"]), str(out["error"])
+    for _ in range(2):
+        try:
+            out = q.get(timeout=0.1)
+            return bool(out["ok"]), str(out["error"])
+        except queue.Empty:
+            continue
+    if proc.exitcode not in {0, None}:
+        return False, f"ProcessCrashed(exitcode={proc.exitcode})"
+    return False, "NoResult"
 
 
 def run_tests(code: str, tests: list[str], timeout_s: int) -> tuple[int, int, list[str]]:
@@ -95,8 +107,12 @@ def run_test_script(code: str, script: str, timeout_s: int) -> tuple[bool, str]:
         proc.terminate()
         proc.join()
         return False, "Timeout"
-    try:
-        out = q.get_nowait()
-    except queue.Empty:
-        return False, "NoResult"
-    return bool(out["ok"]), str(out["error"])
+    for _ in range(2):
+        try:
+            out = q.get(timeout=0.1)
+            return bool(out["ok"]), str(out["error"])
+        except queue.Empty:
+            continue
+    if proc.exitcode not in {0, None}:
+        return False, f"ProcessCrashed(exitcode={proc.exitcode})"
+    return False, "NoResult"

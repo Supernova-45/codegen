@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from config import ensure_output_path, load_config
 from data.mbppplus_loader import load_mbppplus_tests
 from data.mbpp_loader import filter_tasks, load_variant_file
+from execution.adapter import build_effective_code
 from execution.sandbox import run_test_script
 from models.openai_compatible import OpenAICompatibleClient
 from pipeline.run_problem import run_problem
@@ -85,8 +86,14 @@ def main() -> None:
                 if cfg.mbppplus_enabled:
                     mbppplus_script = mbppplus_by_task.get(task.task_id)
                     if mbppplus_script:
-                        mbppplus_ok, mbppplus_err = run_test_script(
+                        effective_mbpp_code, _ = build_effective_code(
                             result.final_code,
+                            expected_function_name=task.function_name,
+                            expected_arity=None,
+                            enabled=cfg.pipeline.eval_with_adapter,
+                        )
+                        mbppplus_ok, mbppplus_err = run_test_script(
+                            effective_mbpp_code,
                             mbppplus_script,
                             cfg.mbppplus_timeout_s,
                         )

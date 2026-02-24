@@ -1,0 +1,10 @@
+condition,strategy,avg_questions
+ambiguous,eig-tests,1.0
+ambiguous,one-shot,0.0
+ambiguous,random-tests,1.1
+incomplete,eig-tests,1.0
+incomplete,one-shot,0.0
+incomplete,random-tests,1.2
+original,eig-tests,0.8
+original,one-shot,0.0
+original,random-tests,1.6
