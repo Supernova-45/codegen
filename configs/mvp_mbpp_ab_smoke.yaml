@@ -1,6 +1,6 @@
-experiment_name: mvp_mbpp
+experiment_name: mvp_mbpp_ab_smoke
 seed: 42
-max_examples: 30
+max_examples: 1
 shuffle: false
 
 dataset:
@@ -10,7 +10,7 @@ dataset:
     - incomplete
     - ambiguous
   mbppplus:
-    enabled: true
+    enabled: false
     dataset: evalplus/mbppplus
     split: test
     timeout_s: 15
@@ -19,14 +19,14 @@ model:
   base_url_env: CLARIFYCODE_BASE_URL
   api_key_env: CLARIFYCODE_API_KEY
   model_env: CLARIFYCODE_MODEL
-  temperature: 0.8
-  request_timeout_s: 90
+  temperature: 0.6
+  request_timeout_s: 60
 
 pipeline:
   strategy: eig-tests
-  n_candidates: 16
-  tests_per_round: 16
-  k_max: 4
+  n_candidates: 4
+  tests_per_round: 4
+  k_max: 2
   epsilon: 0.02
   gamma: 0.85
   min_questions_if_valid: 1
@@ -34,14 +34,14 @@ pipeline:
   enforce_test_signature_arity: true
   filter_non_discriminative: true
   min_eig_score: 0.03
-  max_test_regen_attempts: 4
-  eig_questions_per_round: 2
-  candidate_temperature: 0.9
+  max_test_regen_attempts: 1
+  eig_questions_per_round: 1
+  candidate_temperature: 0.6
   reprompt_temperature: 0.2
   eval_with_adapter: true
-  run_reprompt: true
+  run_reprompt: false
   sandbox_timeout_s: 3
 
 output:
   results_dir: results
-  output_file: latest.jsonl
+  output_file: highvalue_eval_smoke.jsonl

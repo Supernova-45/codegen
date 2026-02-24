@@ -1,0 +1,7 @@
+condition,strategy,n,mbppplus_pass_at_1
+ambiguous,eig-tests,7,0.0
+ambiguous,random-tests,7,0.0
+incomplete,eig-tests,7,0.0
+incomplete,random-tests,7,0.0
+original,eig-tests,7,0.0
+original,random-tests,7,0.0

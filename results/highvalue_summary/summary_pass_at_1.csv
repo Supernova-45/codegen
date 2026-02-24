@@ -1,0 +1,7 @@
+condition,strategy,n,pass_at_1
+ambiguous,eig-tests,10,0.2
+ambiguous,random-tests,10,0.3
+incomplete,eig-tests,10,0.3
+incomplete,random-tests,10,0.1
+original,eig-tests,10,0.4
+original,random-tests,10,0.5

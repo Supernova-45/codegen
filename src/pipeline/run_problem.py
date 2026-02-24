@@ -79,6 +79,7 @@ def run_problem(
             n=1,
             function_name=task.function_name,
             signature_hint=signature_hint,
+            visible_tests=task.visible_tests,
             temperature=0.2,
         )
         usage.prompt_tokens += u.prompt_tokens
@@ -126,7 +127,8 @@ def run_problem(
         n=cfg.n_candidates,
         function_name=task.function_name,
         signature_hint=signature_hint,
-        temperature=0.8,
+        visible_tests=task.visible_tests,
+        temperature=cfg.candidate_temperature,
     )
     usage.prompt_tokens += u_codes.prompt_tokens
     usage.completion_tokens += u_codes.completion_tokens
@@ -143,6 +145,7 @@ def run_problem(
         candidate_adapters.append(adapter_info.to_dict())
     posterior = ParticlePosterior.uniform(candidates)
     asked: list[tuple[str, bool]] = []
+    asked_details: list[dict[str, Any]] = []
     chosen_tests: list[dict[str, Any]] = []
 
     eig_score_floor = cfg.min_eig_score if strategy == "eig-tests" else None
@@ -160,6 +163,7 @@ def run_problem(
                 signature_hint=signature_hint,
                 expected_arity=test_arity,
                 asked_tests=[x[0] for x in asked],
+                visible_tests=task.visible_tests,
                 n_tests=cfg.tests_per_round,
             )
             usage.prompt_tokens += u_tests.prompt_tokens
@@ -179,11 +183,20 @@ def run_problem(
                     "valid_count": len(valid_tests),
                 }
             )
-            if strategy != "eig-tests" or not valid_tests or eig_score_floor is None:
+            if strategy != "eig-tests" or eig_score_floor is None:
                 break
+            if not valid_tests:
+                if regen_count >= cfg.max_test_regen_attempts:
+                    break
+                regen_count += 1
+                continue
             _, regen_scores = select_max_eig(valid_tests, outcomes_by_test, posterior, cfg.epsilon)
             best_score = max(regen_scores) if regen_scores else 0.0
-            if best_score >= eig_score_floor or regen_count >= cfg.max_test_regen_attempts:
+            high_value_count = sum(1 for s in regen_scores if s >= eig_score_floor)
+            if (
+                (best_score >= eig_score_floor and high_value_count >= cfg.eig_questions_per_round)
+                or regen_count >= cfg.max_test_regen_attempts
+            ):
                 break
             regen_count += 1
         round_log: dict[str, Any] = {
@@ -211,6 +224,16 @@ def run_problem(
             selected_indices = [rng.randrange(len(valid_tests))]
         else:
             _, scores = select_max_eig(valid_tests, outcomes_by_test, posterior, cfg.epsilon)
+            if eig_score_floor is not None:
+                valid_by_score = [i for i, s in enumerate(scores) if s >= eig_score_floor]
+                valid_tests = [valid_tests[i] for i in valid_by_score]
+                outcomes_by_test = [outcomes_by_test[i] for i in valid_by_score]
+                scores = [scores[i] for i in valid_by_score]
+            if not valid_tests:
+                round_log["decision"] = "no_high_value_tests_stop"
+                round_log["eig_score_floor"] = eig_score_floor
+                interaction_trace.append(round_log)
+                break
             order = sorted(range(len(valid_tests)), key=lambda i: scores[i], reverse=True)
             selected_indices = order[: max(1, cfg.eig_questions_per_round)]
 
@@ -227,13 +250,24 @@ def run_problem(
                 stop_after_round = True
                 break
 
-            observed, _ = run_assertion(task.oracle_code, selected_test, cfg.sandbox_timeout_s)
+            observed, oracle_error = run_assertion(task.oracle_code, selected_test, cfg.sandbox_timeout_s)
+            oracle_runtime_error = _is_runtime_error(observed, oracle_error)
             posterior.update(outcomes, observed, cfg.epsilon)
             asked.append((selected_test, observed))
+            asked_details.append(
+                {
+                    "test": selected_test,
+                    "observed": observed,
+                    "oracle_error": oracle_error,
+                    "oracle_runtime_error": oracle_runtime_error,
+                }
+            )
             chosen_tests.append(
                 {
                     "test": selected_test,
                     "observed": observed,
+                    "oracle_error": oracle_error,
+                    "oracle_runtime_error": oracle_runtime_error,
                     "map_before": p_current,
                     "map_expected_after": p_next,
                     "score": selected_score,
@@ -246,6 +280,7 @@ def run_problem(
                     "map_before": p_current,
                     "map_expected_after": p_next,
                     "oracle_observed": observed,
+                    "oracle_error": oracle_error,
                 }
             )
 
@@ -266,21 +301,108 @@ def run_problem(
         if stop_after_round:
             break
 
+    map_candidate_index = posterior.map_index()
+    final_code = candidates[map_candidate_index]
+    reprompt_log: dict[str, Any] = {
+        "step": "reprompt_decision",
+        "run_reprompt_enabled": cfg.run_reprompt,
+        "asked_count": len(asked),
+        "map_candidate_index": map_candidate_index,
+        "used_map_candidate_fallback": True,
+    }
     if cfg.run_reprompt and asked:
-        constraints = [(t, a) for t, a in asked]
-        new_code, u = model.generate_code_candidates(
-            task.prompt,
-            n=1,
-            function_name=task.function_name,
-                signature_hint=signature_hint,
-            constraints=constraints,
-            temperature=0.2,
+        observed_values = [entry["observed"] for entry in asked_details]
+        false_rate = sum(1 for v in observed_values if not v) / len(observed_values)
+        runtime_error_rate = (
+            sum(1 for x in asked_details if x["oracle_runtime_error"]) / len(asked_details)
         )
-        usage.prompt_tokens += u.prompt_tokens
-        usage.completion_tokens += u.completion_tokens
-        final_code = new_code[0]
+        reason_codes: list[str] = []
+        if len(asked_details) < cfg.reprompt_min_questions:
+            reason_codes.append("below_min_questions")
+        if cfg.reprompt_require_mixed_outcomes and not (
+            any(observed_values) and any(not x for x in observed_values)
+        ):
+            reason_codes.append("missing_mixed_outcomes")
+        if false_rate > cfg.reprompt_max_false_rate:
+            reason_codes.append("false_rate_above_threshold")
+        if runtime_error_rate > cfg.reprompt_max_runtime_error_rate:
+            reason_codes.append("runtime_error_rate_above_threshold")
+
+        reprompt_log.update(
+            {
+                "false_rate": false_rate,
+                "runtime_error_rate": runtime_error_rate,
+                "reason_codes": reason_codes,
+            }
+        )
+        if not reason_codes:
+            constraints = [(t, a) for t, a in asked]
+            new_code, u = model.generate_code_candidates(
+                task.prompt,
+                n=1,
+                function_name=task.function_name,
+                signature_hint=signature_hint,
+                visible_tests=task.visible_tests,
+                constraints=constraints,
+                temperature=cfg.reprompt_temperature,
+            )
+            usage.prompt_tokens += u.prompt_tokens
+            usage.completion_tokens += u.completion_tokens
+            reprompt_candidate = new_code[0]
+            effective_candidate_code, candidate_adapter_info = build_effective_code(
+                reprompt_candidate,
+                expected_function_name=task.function_name,
+                expected_arity=expected_arity,
+                enabled=cfg.eval_with_adapter,
+            )
+
+            validation_checks: list[dict[str, Any]] = []
+            matched = 0
+            for entry in asked_details:
+                got_ok, got_error = run_assertion(
+                    effective_candidate_code,
+                    entry["test"],
+                    cfg.sandbox_timeout_s,
+                )
+                is_match = got_ok == entry["observed"]
+                if is_match:
+                    matched += 1
+                validation_checks.append(
+                    {
+                        "test": entry["test"],
+                        "expected_observed": entry["observed"],
+                        "candidate_observed": got_ok,
+                        "candidate_error": got_error,
+                        "matches": is_match,
+                    }
+                )
+            match_rate = matched / max(1, len(asked_details))
+            reprompt_log.update(
+                {
+                    "reprompt_attempted": True,
+                    "reprompt_candidate": reprompt_candidate,
+                    "reprompt_candidate_adapter_info": candidate_adapter_info.to_dict(),
+                    "constraint_validation": validation_checks,
+                    "constraint_match_rate": match_rate,
+                    "constraint_match_threshold": cfg.reprompt_min_constraint_match_rate,
+                }
+            )
+            if match_rate >= cfg.reprompt_min_constraint_match_rate:
+                final_code = reprompt_candidate
+                reprompt_log["decision"] = "use_reprompt_candidate"
+                reprompt_log["used_map_candidate_fallback"] = False
+            else:
+                reprompt_log["decision"] = "fallback_to_map_candidate"
+                reprompt_log["reason_codes"] = ["constraint_match_below_threshold"]
+        else:
+            reprompt_log["decision"] = "skip_reprompt"
+    elif cfg.run_reprompt:
+        reprompt_log["decision"] = "skip_reprompt"
+        reprompt_log["reason_codes"] = ["no_clarification_questions"]
     else:
-        final_code = candidates[posterior.map_index()]
+        reprompt_log["decision"] = "skip_reprompt"
+        reprompt_log["reason_codes"] = ["reprompt_disabled"]
+    interaction_trace.append(reprompt_log)
 
     effective_final_code, final_adapter_info = build_effective_code(
         final_code,
@@ -308,6 +430,12 @@ def run_problem(
         interaction_trace=interaction_trace,
         model_trace=model.get_trace(),
     )
+
+
+def _is_runtime_error(ok: bool, error: str) -> bool:
+    if ok:
+        return False
+    return "AssertionError" not in error
 
 
 def _evaluate_test_matrix(

@@ -15,7 +15,6 @@ Currently supports:
 - Optional MBPP+ strict re-scoring (`evalplus/mbppplus`)
 - prompt conditions: `original`, `incomplete`, `ambiguous`
 - strategies: `one-shot`, `random-tests`, `eig-tests`
-- OpenAI-compatible chat-completions backend
 
 ## Environment Setup
 
@@ -62,14 +61,18 @@ Required environment variables:
 Optional:
 - `CLARIFYCODE_BASE_URL` (defaults to OpenAI public endpoint)
 
-## Prepare MBPP Variants
+## Prepare MBPP Variants (Example)
 
 ```bash
 python scripts/prepare_mbpp_variants.py \
-  --ticode-mbpp /Users/alexandrakim/Desktop/codegen/TiCoder/datasets/mbpp/mbpp.jsonl \
-  --robustness-dir /Users/alexandrakim/Desktop/codegen/Robustness-of-LLMs-to-prompt-imperfections/datasets/mbpp \
   --output data/mbpp_variants.jsonl
 ```
+
+Default source paths are now vendored in this repo:
+- `data/sources/ticode_mbpp/mbpp.jsonl`
+- `data/sources/robustness_mbpp/{MBPP.json,incomplete_MBPP.json,ambiguous_MBPP.json}`
+
+You can still override with `--ticode-mbpp` and `--robustness-dir` if needed.
 
 `scripts/run_experiment.py` automatically loads `.env`.
 
@@ -90,6 +93,8 @@ EIG tuning knobs in `pipeline`:
 - `max_test_regen_attempts`: retries for generating stronger clarification tests if scores are too low
 - `eval_with_adapter`: evaluate with compatibility wrapper so correct logic can pass despite naming/signature variance
 - `eig_questions_per_round`: number of top-ranked EIG questions asked each round (no diversity constraint)
+- `candidate_temperature`: sampling temperature for candidate program generation
+- `reprompt_temperature`: sampling temperature for post-clarification regeneration
 
 ## Summarize Results
 

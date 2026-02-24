@@ -1,0 +1,3 @@
+condition,strategy,avg_total_tokens,median_total_tokens
+original,eig-tests,2333,2333
+original,random-tests,1860,1860

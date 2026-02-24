@@ -1,0 +1,17 @@
+condition,strategy,k,n,pass_at_1
+ambiguous,eig-tests,0,4,0.5
+ambiguous,eig-tests,2,1,0.0
+ambiguous,eig-tests,4,5,0.0
+ambiguous,random-tests,0,2,0.0
+ambiguous,random-tests,4,8,0.375
+incomplete,eig-tests,0,4,0.25
+incomplete,eig-tests,4,6,0.3333333333333333
+incomplete,random-tests,0,4,0.25
+incomplete,random-tests,4,6,0.0
+original,eig-tests,0,2,0.5
+original,eig-tests,2,3,0.3333333333333333
+original,eig-tests,4,5,0.4
+original,random-tests,0,4,0.5
+original,random-tests,2,1,1.0
+original,random-tests,3,1,1.0
+original,random-tests,4,4,0.25

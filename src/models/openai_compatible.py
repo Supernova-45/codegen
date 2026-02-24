@@ -107,13 +107,16 @@ class OpenAICompatibleClient:
         n: int,
         function_name: str | None = None,
         signature_hint: str | None = None,
+        visible_tests: list[str] | None = None,
         constraints: list[tuple[str, bool]] | None = None,
         temperature: float | None = None,
     ) -> tuple[list[str], Usage]:
         constraints = constraints or []
+        visible_tests = visible_tests or []
         constraint_lines = "\n".join(
             f"- {test} => {answer}" for test, answer in constraints
         )
+        visible_lines = "\n".join(f"- {x}" for x in visible_tests[:2])
         user_prompt = (
             "Write only Python code implementing the requested function.\n"
             "Do not include markdown fences.\n\n"
@@ -125,6 +128,11 @@ class OpenAICompatibleClient:
             user_prompt += (
                 f"\nUse this call shape for the target function: {signature_hint}\n"
                 "Keep parameter count and order consistent with that signature.\n"
+            )
+        if visible_lines:
+            user_prompt += (
+                "\nVisible examples (stay consistent with argument order and behavior):\n"
+                f"{visible_lines}\n"
             )
         if constraint_lines:
             user_prompt += f"\nObserved clarification tests:\n{constraint_lines}\n"
@@ -158,9 +166,12 @@ class OpenAICompatibleClient:
         signature_hint: str | None,
         expected_arity: int | None,
         asked_tests: list[str],
+        visible_tests: list[str] | None,
         n_tests: int,
     ) -> tuple[list[str], Usage, dict[str, int]]:
+        visible_tests = visible_tests or []
         already = "\n".join(f"- {x}" for x in asked_tests) if asked_tests else "- none"
+        visible_lines = "\n".join(f"- {x}" for x in visible_tests[:2]) if visible_tests else "- none"
         signature_text = signature_hint or f"{function_name or 'target_function'}(...)"
         txt, usage = self._chat(
             [
@@ -170,6 +181,8 @@ class OpenAICompatibleClient:
                     "content": (
                         "Given the task, propose candidate binary clarification tests.\n"
                         "Return exactly one assert per line.\n"
+                        "Every output line must start with 'assert '.\n"
+                        "Do not emit bare function calls.\n"
                         "No prose, no numbering, no markdown.\n"
                         "Each assert must be standalone and executable by itself.\n"
                         "Use only Python literals in inputs (ints, floats, strings, bools, lists, tuples, dicts).\n"
@@ -177,8 +190,10 @@ class OpenAICompatibleClient:
                         "Do not reference any names except the target function.\n"
                         "Use this exact function-call shape when writing asserts:\n"
                         f"{signature_text}\n"
+                        "Match argument order implied by visible examples.\n"
                         "Prefer edge cases that split plausible implementations.\n"
                         f"Task:\n{prompt}\n\n"
+                        f"Visible examples:\n{visible_lines}\n\n"
                         f"Function under test: {function_name or 'unknown'}\n"
                         f"Already asked tests:\n{already}\n\n"
                         f"Need {n_tests} candidate asserts."

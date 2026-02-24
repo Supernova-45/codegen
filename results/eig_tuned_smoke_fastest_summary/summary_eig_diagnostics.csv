@@ -1,0 +1,3 @@
+condition,strategy,rounds,avg_generated_tests_per_round,selected_tests,avg_selected_eig_score,selected_zero_score_frac,filtered_non_discriminative,filtered_universal_runtime_error,filtered_signature_mismatch,signature_mismatch_rate,accepted_assert_rate,adapter_applied_rate,adapter_success_rate,type_error_rate,noresult_rate,process_crash_rate
+original,eig-tests,1,4.0,0,0.0,0.0,3,1,0,0.0,1.0,1.0,1.0,0.0,0.0,0.0
+original,random-tests,1,4.0,0,0.0,0.0,4,0,0,0.0,1.0,1.0,1.0,0.0,0.0,0.0

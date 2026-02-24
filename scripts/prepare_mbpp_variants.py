@@ -82,8 +82,14 @@ def build_task_rows(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ticode-mbpp", required=True)
-    parser.add_argument("--robustness-dir", required=True)
+    parser.add_argument(
+        "--ticode-mbpp",
+        default=str(ROOT / "data/sources/ticode_mbpp/mbpp.jsonl"),
+    )
+    parser.add_argument(
+        "--robustness-dir",
+        default=str(ROOT / "data/sources/robustness_mbpp"),
+    )
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 

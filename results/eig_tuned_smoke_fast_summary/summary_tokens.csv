@@ -1,0 +1,7 @@
+condition,strategy,avg_total_tokens,median_total_tokens
+ambiguous,eig-tests,4210,4210
+ambiguous,random-tests,2916,2916
+incomplete,eig-tests,2211,2211
+incomplete,random-tests,2096,2096
+original,eig-tests,2751,2751
+original,random-tests,1917,1917

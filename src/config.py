@@ -33,8 +33,15 @@ class PipelineConfig:
     min_eig_score: float
     max_test_regen_attempts: int
     eig_questions_per_round: int
+    candidate_temperature: float
+    reprompt_temperature: float
     eval_with_adapter: bool
     run_reprompt: bool
+    reprompt_min_questions: int
+    reprompt_require_mixed_outcomes: bool
+    reprompt_max_false_rate: float
+    reprompt_max_runtime_error_rate: float
+    reprompt_min_constraint_match_rate: float
     sandbox_timeout_s: int
 
 
@@ -107,8 +114,17 @@ def load_config(path: str) -> ExperimentConfig:
         min_eig_score=float(pipeline.get("min_eig_score", 0.02)),
         max_test_regen_attempts=int(pipeline.get("max_test_regen_attempts", 1)),
         eig_questions_per_round=int(pipeline.get("eig_questions_per_round", 2)),
+        candidate_temperature=float(pipeline.get("candidate_temperature", 0.8)),
+        reprompt_temperature=float(pipeline.get("reprompt_temperature", 0.2)),
         eval_with_adapter=bool(pipeline.get("eval_with_adapter", True)),
         run_reprompt=bool(pipeline["run_reprompt"]),
+        reprompt_min_questions=int(pipeline.get("reprompt_min_questions", 2)),
+        reprompt_require_mixed_outcomes=bool(pipeline.get("reprompt_require_mixed_outcomes", True)),
+        reprompt_max_false_rate=float(pipeline.get("reprompt_max_false_rate", 0.75)),
+        reprompt_max_runtime_error_rate=float(pipeline.get("reprompt_max_runtime_error_rate", 0.25)),
+        reprompt_min_constraint_match_rate=float(
+            pipeline.get("reprompt_min_constraint_match_rate", 0.75)
+        ),
         sandbox_timeout_s=int(pipeline["sandbox_timeout_s"]),
     )
 

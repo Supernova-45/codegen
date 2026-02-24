@@ -1,6 +1,6 @@
-experiment_name: mvp_mbpp
+experiment_name: mvp_mbpp_eig_tuned_smoke
 seed: 42
-max_examples: 30
+max_examples: 3
 shuffle: false
 
 dataset:
@@ -10,7 +10,7 @@ dataset:
     - incomplete
     - ambiguous
   mbppplus:
-    enabled: true
+    enabled: false
     dataset: evalplus/mbppplus
     split: test
     timeout_s: 15
@@ -33,15 +33,20 @@ pipeline:
   min_valid_candidate_coverage: 0.6
   enforce_test_signature_arity: true
   filter_non_discriminative: true
-  min_eig_score: 0.03
-  max_test_regen_attempts: 4
-  eig_questions_per_round: 2
-  candidate_temperature: 0.9
-  reprompt_temperature: 0.2
+  min_eig_score: 0.02
+  max_test_regen_attempts: 6
+  eig_questions_per_round: 1
+  candidate_temperature: 0.7
+  reprompt_temperature: 0.1
   eval_with_adapter: true
   run_reprompt: true
+  reprompt_min_questions: 2
+  reprompt_require_mixed_outcomes: true
+  reprompt_max_false_rate: 0.75
+  reprompt_max_runtime_error_rate: 0.25
+  reprompt_min_constraint_match_rate: 0.75
   sandbox_timeout_s: 3
 
 output:
   results_dir: results
-  output_file: latest.jsonl
+  output_file: eig_tuned_smoke.jsonl

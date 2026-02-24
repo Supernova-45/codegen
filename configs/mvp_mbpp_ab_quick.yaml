@@ -1,6 +1,6 @@
-experiment_name: mvp_mbpp
+experiment_name: mvp_mbpp_ab_quick
 seed: 42
-max_examples: 30
+max_examples: 4 
 shuffle: false
 
 dataset:
@@ -44,4 +44,4 @@ pipeline:
 
 output:
   results_dir: results
-  output_file: latest.jsonl
+  output_file: highvalue_eval_quick.jsonl

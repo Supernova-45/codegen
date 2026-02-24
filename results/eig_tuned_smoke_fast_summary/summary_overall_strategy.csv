@@ -1,0 +1,3 @@
+strategy,n,pass_at_1,mbppplus_pass_at_1,mbppplus_n,avg_questions,avg_total_tokens
+eig-tests,3,0.3333333333333333,,0,1.3333333333333333,3057.3333333333335
+random-tests,3,0.0,,0,1.3333333333333333,2309.6666666666665

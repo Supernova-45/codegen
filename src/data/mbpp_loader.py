@@ -76,7 +76,7 @@ def infer_signature_hint(
             continue
         call = calls[0]
         arg_count = len(call.args)
-        arg_names = ", ".join(f"arg{i + 1}" for i in range(arg_count))
+        arg_names = ", ".join(_infer_arg_names(call.args))
         return f"{function_name}({arg_names})", arg_count
     return None, None
 
@@ -89,3 +89,38 @@ def _find_calls(expr: ast.AST, function_name: str) -> list[ast.Call]:
         if isinstance(node.func, ast.Name) and node.func.id == function_name:
             calls.append(node)
     return calls
+
+
+def _infer_arg_names(args: list[ast.AST]) -> list[str]:
+    raw = [_arg_role_name(arg, i + 1) for i, arg in enumerate(args)]
+    seen: dict[str, int] = {}
+    names: list[str] = []
+    for base in raw:
+        seen[base] = seen.get(base, 0) + 1
+        if seen[base] == 1:
+            names.append(base)
+        else:
+            names.append(f"{base}{seen[base]}")
+    return names
+
+
+def _arg_role_name(arg: ast.AST, idx: int) -> str:
+    if isinstance(arg, ast.List):
+        return "list_arg"
+    if isinstance(arg, ast.Tuple):
+        return "tuple_arg"
+    if isinstance(arg, ast.Dict):
+        return "dict_arg"
+    if isinstance(arg, ast.Set):
+        return "set_arg"
+    if isinstance(arg, ast.Constant):
+        value = arg.value
+        if isinstance(value, bool):
+            return "bool_arg"
+        if isinstance(value, int):
+            return "int_arg"
+        if isinstance(value, float):
+            return "float_arg"
+        if isinstance(value, str):
+            return "str_arg"
+    return f"arg{idx}"

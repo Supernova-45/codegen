@@ -1,0 +1,7 @@
+condition,strategy,avg_questions
+ambiguous,eig-tests,2.2
+ambiguous,random-tests,3.2
+incomplete,eig-tests,2.4
+incomplete,random-tests,2.4
+original,eig-tests,2.6
+original,random-tests,2.1

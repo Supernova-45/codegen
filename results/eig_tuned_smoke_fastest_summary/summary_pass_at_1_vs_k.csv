@@ -1,0 +1,3 @@
+condition,strategy,k,n,pass_at_1
+original,eig-tests,0,1,0.0
+original,random-tests,0,1,0.0

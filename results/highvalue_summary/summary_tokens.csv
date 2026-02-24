@@ -1,0 +1,7 @@
+condition,strategy,avg_total_tokens,median_total_tokens
+ambiguous,eig-tests,5039.2,4897.0
+ambiguous,random-tests,4777.5,4557.0
+incomplete,eig-tests,4687.9,4269.0
+incomplete,random-tests,4221.2,4550.5
+original,eig-tests,5061.9,4732.5
+original,random-tests,4438.5,4576.0
