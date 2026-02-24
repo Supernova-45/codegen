@@ -28,6 +28,10 @@ class PipelineConfig:
     gamma: float
     min_questions_if_valid: int
     min_valid_candidate_coverage: float
+    enforce_test_signature_arity: bool
+    filter_non_discriminative: bool
+    min_eig_score: float
+    max_test_regen_attempts: int
     run_reprompt: bool
     sandbox_timeout_s: int
 
@@ -96,6 +100,10 @@ def load_config(path: str) -> ExperimentConfig:
         gamma=float(pipeline["gamma"]),
         min_questions_if_valid=int(pipeline.get("min_questions_if_valid", 1)),
         min_valid_candidate_coverage=float(pipeline.get("min_valid_candidate_coverage", 0.6)),
+        enforce_test_signature_arity=bool(pipeline.get("enforce_test_signature_arity", True)),
+        filter_non_discriminative=bool(pipeline.get("filter_non_discriminative", True)),
+        min_eig_score=float(pipeline.get("min_eig_score", 0.02)),
+        max_test_regen_attempts=int(pipeline.get("max_test_regen_attempts", 1)),
         run_reprompt=bool(pipeline["run_reprompt"]),
         sandbox_timeout_s=int(pipeline["sandbox_timeout_s"]),
     )

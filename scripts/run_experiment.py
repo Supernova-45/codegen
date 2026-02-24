@@ -26,9 +26,29 @@ def main() -> None:
         nargs="+",
         default=["one-shot", "random-tests", "eig-tests"],
     )
+    parser.add_argument("--output-file")
+    parser.add_argument("--pipeline-overrides", nargs="*", default=[])
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if args.output_file:
+        cfg.output_file = args.output_file
+    for raw in args.pipeline_overrides:
+        if "=" not in raw:
+            raise ValueError(f"Invalid --pipeline-overrides entry: {raw}. Use key=value format.")
+        key, value = raw.split("=", 1)
+        if not hasattr(cfg.pipeline, key):
+            raise ValueError(f"Unknown pipeline override key: {key}")
+        cur = getattr(cfg.pipeline, key)
+        if isinstance(cur, bool):
+            parsed = value.lower() in {"1", "true", "yes", "y", "on"}
+        elif isinstance(cur, int) and not isinstance(cur, bool):
+            parsed = int(value)
+        elif isinstance(cur, float):
+            parsed = float(value)
+        else:
+            parsed = value
+        setattr(cfg.pipeline, key, parsed)
     random.seed(cfg.seed)
 
     all_tasks = load_variant_file(cfg.variants_path)

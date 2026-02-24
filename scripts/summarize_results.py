@@ -73,6 +73,69 @@ def token_summary(rows: list[dict]) -> list[dict]:
     return out
 
 
+def eig_diagnostics(rows: list[dict]) -> list[dict]:
+    grouped: dict[tuple[str, str], dict[str, float]] = {}
+    for row in rows:
+        key = (row["condition"], row["strategy"])
+        grouped.setdefault(
+            key,
+            {
+                "rounds": 0.0,
+                "generated_tests": 0.0,
+                "selected_tests": 0.0,
+                "sum_selected_score": 0.0,
+                "zero_score_selected": 0.0,
+                "filtered_non_discriminative": 0.0,
+                "filtered_signature_mismatch": 0.0,
+                "filter_assert_lines": 0.0,
+                "filter_accepted": 0.0,
+            },
+        )
+        stats = grouped[key]
+        for step in row.get("interaction_trace", []):
+            if "round" not in step:
+                continue
+            stats["rounds"] += 1
+            test_validation = step.get("test_validation", [])
+            stats["generated_tests"] += len(step.get("generated_tests", []))
+            for tv in test_validation:
+                if tv.get("invalid_reason") == "non_discriminative":
+                    stats["filtered_non_discriminative"] += 1
+            if step.get("decision") == "ask_and_update":
+                stats["selected_tests"] += 1
+                sel_score = step.get("selected_test_score")
+                if isinstance(sel_score, (int, float)):
+                    stats["sum_selected_score"] += float(sel_score)
+                    if abs(float(sel_score)) < 1e-12:
+                        stats["zero_score_selected"] += 1
+            for gen in step.get("test_generation_stats", []):
+                filt = gen.get("filter_stats", {})
+                stats["filtered_signature_mismatch"] += float(filt.get("signature_mismatch", 0))
+                stats["filter_assert_lines"] += float(filt.get("assert_lines", 0))
+                stats["filter_accepted"] += float(filt.get("accepted", 0))
+
+    out: list[dict] = []
+    for (condition, strategy), s in sorted(grouped.items()):
+        selected = max(1.0, s["selected_tests"])
+        asserted = max(1.0, s["filter_assert_lines"])
+        out.append(
+            {
+                "condition": condition,
+                "strategy": strategy,
+                "rounds": int(s["rounds"]),
+                "avg_generated_tests_per_round": s["generated_tests"] / max(1.0, s["rounds"]),
+                "selected_tests": int(s["selected_tests"]),
+                "avg_selected_eig_score": s["sum_selected_score"] / selected,
+                "selected_zero_score_frac": s["zero_score_selected"] / selected,
+                "filtered_non_discriminative": int(s["filtered_non_discriminative"]),
+                "filtered_signature_mismatch": int(s["filtered_signature_mismatch"]),
+                "signature_mismatch_rate": s["filtered_signature_mismatch"] / asserted,
+                "accepted_assert_rate": s["filter_accepted"] / asserted,
+            }
+        )
+    return out
+
+
 def overall_strategy_summary(rows: list[dict]) -> list[dict]:
     grouped: dict[str, list[dict]] = {}
     for row in rows:
@@ -187,6 +250,7 @@ def main() -> None:
     write_csv(out_dir / "summary_pass_at_1_vs_k.csv", by_k)
     write_csv(out_dir / "summary_tokens.csv", tok)
     write_csv(out_dir / "summary_overall_strategy.csv", overall)
+    write_csv(out_dir / "summary_eig_diagnostics.csv", eig_diagnostics(rows))
     write_markdown_table(out_dir / "comparison_table.md", overall, p1, mbppplus_by_condition)
 
     print("Wrote:")
@@ -196,6 +260,7 @@ def main() -> None:
     print(f"- {out_dir / 'summary_pass_at_1_vs_k.csv'}")
     print(f"- {out_dir / 'summary_tokens.csv'}")
     print(f"- {out_dir / 'summary_overall_strategy.csv'}")
+    print(f"- {out_dir / 'summary_eig_diagnostics.csv'}")
     print(f"- {out_dir / 'comparison_table.md'}")
 
 

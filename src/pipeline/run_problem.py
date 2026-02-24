@@ -5,7 +5,7 @@ import random
 from typing import Any
 
 from config import PipelineConfig
-from data.mbpp_loader import MBPPTask
+from data.mbpp_loader import MBPPTask, infer_signature_hint
 from execution.sandbox import run_assertion, run_tests
 from models.openai_compatible import OpenAICompatibleClient, Usage
 from posterior.particle_posterior import ParticlePosterior
@@ -64,13 +64,19 @@ def run_problem(
     usage = Usage()
     model.clear_trace()
     interaction_trace: list[dict[str, Any]] = []
+    signature_hint, expected_arity = infer_signature_hint(task.visible_tests, task.function_name)
+    test_arity = expected_arity if cfg.enforce_test_signature_arity else None
 
     if strategy not in {"one-shot", "random-tests", "eig-tests"}:
         raise ValueError(f"Unsupported strategy: {strategy}")
 
     if strategy == "one-shot":
         code_list, u = model.generate_code_candidates(
-            task.prompt, n=1, function_name=task.function_name, temperature=0.2
+            task.prompt,
+            n=1,
+            function_name=task.function_name,
+            signature_hint=signature_hint,
+            temperature=0.2,
         )
         usage.prompt_tokens += u.prompt_tokens
         usage.completion_tokens += u.completion_tokens
@@ -108,6 +114,7 @@ def run_problem(
         task.prompt,
         n=cfg.n_candidates,
         function_name=task.function_name,
+        signature_hint=signature_hint,
         temperature=0.8,
     )
     usage.prompt_tokens += u_codes.prompt_tokens
@@ -116,21 +123,47 @@ def run_problem(
     asked: list[tuple[str, bool]] = []
     chosen_tests: list[dict[str, Any]] = []
 
+    eig_score_floor = cfg.min_eig_score if strategy == "eig-tests" else None
     for round_idx in range(cfg.k_max):
-        test_candidates, u_tests = model.generate_candidate_tests(
-            task.prompt,
-            function_name=task.function_name,
-            asked_tests=[x[0] for x in asked],
-            n_tests=cfg.tests_per_round,
-        )
-        usage.prompt_tokens += u_tests.prompt_tokens
-        usage.completion_tokens += u_tests.completion_tokens
-        valid_tests, outcomes_by_test, test_eval_logs = _evaluate_test_matrix(
-            test_candidates,
-            candidates,
-            cfg.sandbox_timeout_s,
-            min_coverage=cfg.min_valid_candidate_coverage,
-        )
+        test_candidates: list[str] = []
+        valid_tests: list[str] = []
+        outcomes_by_test: list[list[bool]] = []
+        test_eval_logs: list[dict[str, Any]] = []
+        generation_stats: list[dict[str, Any]] = []
+        regen_count = 0
+        while True:
+            test_candidates, u_tests, test_filter_stats = model.generate_candidate_tests(
+                task.prompt,
+                function_name=task.function_name,
+                signature_hint=signature_hint,
+                expected_arity=test_arity,
+                asked_tests=[x[0] for x in asked],
+                n_tests=cfg.tests_per_round,
+            )
+            usage.prompt_tokens += u_tests.prompt_tokens
+            usage.completion_tokens += u_tests.completion_tokens
+            valid_tests, outcomes_by_test, test_eval_logs = _evaluate_test_matrix(
+                test_candidates,
+                candidates,
+                cfg.sandbox_timeout_s,
+                min_coverage=cfg.min_valid_candidate_coverage,
+                filter_non_discriminative=cfg.filter_non_discriminative,
+            )
+            generation_stats.append(
+                {
+                    "regen_attempt": regen_count,
+                    "filter_stats": test_filter_stats,
+                    "generated_tests": test_candidates,
+                    "valid_count": len(valid_tests),
+                }
+            )
+            if strategy != "eig-tests" or not valid_tests or eig_score_floor is None:
+                break
+            _, regen_scores = select_max_eig(valid_tests, outcomes_by_test, posterior, cfg.epsilon)
+            best_score = max(regen_scores) if regen_scores else 0.0
+            if best_score >= eig_score_floor or regen_count >= cfg.max_test_regen_attempts:
+                break
+            regen_count += 1
         round_log: dict[str, Any] = {
             "round": round_idx + 1,
             "generated_tests": test_candidates,
@@ -138,6 +171,12 @@ def run_problem(
             "valid_tests": valid_tests,
             "strategy": strategy,
             "asked_so_far": [x[0] for x in asked],
+            "signature_hint": signature_hint,
+            "expected_arity": expected_arity,
+            "enforce_test_signature_arity": cfg.enforce_test_signature_arity,
+            "filter_non_discriminative": cfg.filter_non_discriminative,
+            "test_generation_stats": generation_stats,
+            "regen_attempts_used": regen_count,
         }
         if not valid_tests:
             round_log["decision"] = "no_valid_tests_stop"
@@ -149,6 +188,12 @@ def run_problem(
             scores = []
         else:
             idx, scores = select_max_eig(valid_tests, outcomes_by_test, posterior, cfg.epsilon)
+            if scores and eig_score_floor is not None and max(scores) < eig_score_floor:
+                round_log["decision"] = "low_eig_score_stop"
+                round_log["max_eig_score"] = max(scores)
+                round_log["eig_score_floor"] = eig_score_floor
+                interaction_trace.append(round_log)
+                break
 
         selected_test = valid_tests[idx]
         outcomes = outcomes_by_test[idx]
@@ -195,6 +240,7 @@ def run_problem(
             task.prompt,
             n=1,
             function_name=task.function_name,
+                signature_hint=signature_hint,
             constraints=constraints,
             temperature=0.2,
         )
@@ -230,6 +276,7 @@ def _evaluate_test_matrix(
     candidates: list[str],
     timeout_s: int,
     min_coverage: float,
+    filter_non_discriminative: bool,
 ) -> tuple[list[str], list[list[bool]], list[dict[str, Any]]]:
     valid_tests: list[str] = []
     matrix: list[list[bool]] = []
@@ -268,12 +315,21 @@ def _evaluate_test_matrix(
             deterministic_runs += 1
             outcomes.append(ok1)
         coverage = deterministic_runs / max(1, len(candidates))
-        if valid and outcomes and coverage >= min_coverage:
+        non_discriminative = bool(outcomes) and (all(outcomes) or not any(outcomes))
+        if (
+            valid
+            and outcomes
+            and coverage >= min_coverage
+            and (not filter_non_discriminative or not non_discriminative)
+        ):
             valid_tests.append(test)
             matrix.append(outcomes)
         elif valid and outcomes:
             valid = False
-            invalid_reason = "low_candidate_coverage"
+            if non_discriminative:
+                invalid_reason = "non_discriminative"
+            else:
+                invalid_reason = "low_candidate_coverage"
         logs.append(
             {
                 "test": test,

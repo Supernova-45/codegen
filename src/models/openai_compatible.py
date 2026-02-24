@@ -106,6 +106,7 @@ class OpenAICompatibleClient:
         prompt: str,
         n: int,
         function_name: str | None = None,
+        signature_hint: str | None = None,
         constraints: list[tuple[str, bool]] | None = None,
         temperature: float | None = None,
     ) -> tuple[list[str], Usage]:
@@ -120,6 +121,11 @@ class OpenAICompatibleClient:
         )
         if function_name:
             user_prompt += f"\nThe function name must be exactly: {function_name}\n"
+        if signature_hint:
+            user_prompt += (
+                f"\nUse this call shape for the target function: {signature_hint}\n"
+                "Keep parameter count and order consistent with that signature.\n"
+            )
         if constraint_lines:
             user_prompt += f"\nObserved clarification tests:\n{constraint_lines}\n"
         user_prompt += "\nReturn only code."
@@ -149,10 +155,13 @@ class OpenAICompatibleClient:
         self,
         prompt: str,
         function_name: str | None,
+        signature_hint: str | None,
+        expected_arity: int | None,
         asked_tests: list[str],
         n_tests: int,
-    ) -> tuple[list[str], Usage]:
+    ) -> tuple[list[str], Usage, dict[str, int]]:
         already = "\n".join(f"- {x}" for x in asked_tests) if asked_tests else "- none"
+        signature_text = signature_hint or f"{function_name or 'target_function'}(...)"
         txt, usage = self._chat(
             [
                 {"role": "system", "content": "You design discriminative Python unit tests."},
@@ -166,6 +175,9 @@ class OpenAICompatibleClient:
                         "Use only Python literals in inputs (ints, floats, strings, bools, lists, tuples, dicts).\n"
                         "Do not use helper variables, random values, external files, or extra function calls.\n"
                         "Do not reference any names except the target function.\n"
+                        "Use this exact function-call shape when writing asserts:\n"
+                        f"{signature_text}\n"
+                        "Prefer edge cases that split plausible implementations.\n"
                         f"Task:\n{prompt}\n\n"
                         f"Function under test: {function_name or 'unknown'}\n"
                         f"Already asked tests:\n{already}\n\n"
@@ -182,8 +194,15 @@ class OpenAICompatibleClient:
         )
         lines = [line.strip() for line in txt.splitlines()]
         asserts = [line for line in lines if line.startswith("assert ")]
-        filtered = _filter_assert_lines(asserts, function_name=function_name)
-        return filtered[:n_tests], usage
+        filtered, stats = _filter_assert_lines(
+            asserts,
+            function_name=function_name,
+            expected_arity=expected_arity,
+        )
+        stats["raw_lines"] = len(lines)
+        stats["assert_lines"] = len(asserts)
+        stats["accepted"] = min(n_tests, len(filtered))
+        return filtered[:n_tests], usage, stats
 
 
 def extract_python(text: str) -> str:
@@ -196,27 +215,67 @@ def extract_python(text: str) -> str:
     return text.strip()
 
 
-def _filter_assert_lines(lines: list[str], function_name: str | None) -> list[str]:
+def _filter_assert_lines(
+    lines: list[str],
+    function_name: str | None,
+    expected_arity: int | None,
+) -> tuple[list[str], dict[str, int]]:
     out: list[str] = []
     seen: set[str] = set()
-    fn_token = f"{function_name}(" if function_name else None
+    stats: dict[str, int] = {
+        "duplicates": 0,
+        "invalid_assert_syntax": 0,
+        "wrong_function_name": 0,
+        "signature_mismatch": 0,
+    }
     for line in lines:
         if line in seen:
+            stats["duplicates"] += 1
             continue
-        if fn_token and fn_token not in line:
-            continue
-        if not _is_valid_assert_line(line):
+        valid, reason = _is_valid_assert_line(
+            line,
+            function_name=function_name,
+            expected_arity=expected_arity,
+        )
+        if not valid:
+            stats[reason] = stats.get(reason, 0) + 1
             continue
         out.append(line)
         seen.add(line)
-    return out
+    return out, stats
 
 
-def _is_valid_assert_line(line: str) -> bool:
+def _is_valid_assert_line(
+    line: str,
+    function_name: str | None,
+    expected_arity: int | None,
+) -> tuple[bool, str]:
     try:
         tree = ast.parse(line, mode="exec")
     except SyntaxError:
-        return False
+        return False, "invalid_assert_syntax"
     if len(tree.body) != 1:
-        return False
-    return isinstance(tree.body[0], ast.Assert)
+        return False, "invalid_assert_syntax"
+    stmt = tree.body[0]
+    if not isinstance(stmt, ast.Assert):
+        return False, "invalid_assert_syntax"
+
+    if not function_name:
+        return True, "accepted"
+
+    calls = _find_target_calls(stmt.test, function_name=function_name)
+    if len(calls) != 1:
+        return False, "wrong_function_name"
+    if expected_arity is not None and len(calls[0].args) != expected_arity:
+        return False, "signature_mismatch"
+    return True, "accepted"
+
+
+def _find_target_calls(expr: ast.AST, function_name: str) -> list[ast.Call]:
+    calls: list[ast.Call] = []
+    for node in ast.walk(expr):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == function_name:
+            calls.append(node)
+    return calls

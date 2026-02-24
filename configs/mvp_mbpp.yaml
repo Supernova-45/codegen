@@ -26,11 +26,15 @@ pipeline:
   strategy: eig-tests
   n_candidates: 6
   tests_per_round: 6
-  k_max: 2
+  k_max: 3
   epsilon: 0.02
-  gamma: 0.85
-  min_questions_if_valid: 1
+  gamma: 0.8
+  min_questions_if_valid: 2
   min_valid_candidate_coverage: 0.6
+  enforce_test_signature_arity: true
+  filter_non_discriminative: true
+  min_eig_score: 0.05
+  max_test_regen_attempts: 2
   run_reprompt: false
   sandbox_timeout_s: 3
 

@@ -86,6 +86,8 @@ EIG tuning knobs in `pipeline`:
 - `gamma`: ask-vs-submit threshold (lower asks more often)
 - `min_questions_if_valid`: force at least this many asks when valid tests exist
 - `min_valid_candidate_coverage`: fraction of candidate programs a generated test must execute on
+- `min_eig_score`: minimum EIG score required before asking a clarification test
+- `max_test_regen_attempts`: retries for generating stronger clarification tests if scores are too low
 
 ## Summarize Results
 
@@ -97,3 +99,4 @@ python scripts/summarize_results.py \
 
 Additional MBPP+ summary output:
 - `results/summary_mbppplus_pass_at_1.csv`
+- `results/summary_eig_diagnostics.csv`
