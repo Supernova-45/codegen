@@ -42,6 +42,9 @@ class PipelineConfig:
     reprompt_max_false_rate: float
     reprompt_max_runtime_error_rate: float
     reprompt_min_constraint_match_rate: float
+    eig_discriminative_weight: float
+    eig_runtime_error_penalty: float
+    undefined_outcome_likelihood: float
     sandbox_timeout_s: int
 
 
@@ -71,6 +74,10 @@ def _must_env(var_name: str) -> str:
             "Create a .env file (see .env.example) or export it in your shell."
         )
     return value
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
 
 
 def load_config(path: str) -> ExperimentConfig:
@@ -124,6 +131,21 @@ def load_config(path: str) -> ExperimentConfig:
         reprompt_max_runtime_error_rate=float(pipeline.get("reprompt_max_runtime_error_rate", 0.25)),
         reprompt_min_constraint_match_rate=float(
             pipeline.get("reprompt_min_constraint_match_rate", 0.75)
+        ),
+        eig_discriminative_weight=_clamp(
+            float(pipeline.get("eig_discriminative_weight", 0.35)),
+            0.0,
+            1.0,
+        ),
+        eig_runtime_error_penalty=_clamp(
+            float(pipeline.get("eig_runtime_error_penalty", 0.5)),
+            0.0,
+            1.0,
+        ),
+        undefined_outcome_likelihood=_clamp(
+            float(pipeline.get("undefined_outcome_likelihood", 0.85)),
+            0.0,
+            1.0,
         ),
         sandbox_timeout_s=int(pipeline["sandbox_timeout_s"]),
     )

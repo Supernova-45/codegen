@@ -40,6 +40,9 @@ pipeline:
   reprompt_temperature: 0.2
   eval_with_adapter: true
   run_reprompt: true
+  eig_discriminative_weight: 0.35
+  eig_runtime_error_penalty: 0.5
+  undefined_outcome_likelihood: 0.85
   sandbox_timeout_s: 3
 
 output:

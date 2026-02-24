@@ -89,7 +89,10 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 "zero_score_selected": 0.0,
                 "filtered_non_discriminative": 0.0,
                 "filtered_universal_runtime_error": 0.0,
+                "filtered_low_defined_coverage": 0.0,
                 "filtered_signature_mismatch": 0.0,
+                "filtered_keyword_arguments": 0.0,
+                "filtered_extra_function_calls": 0.0,
                 "filter_assert_lines": 0.0,
                 "filter_accepted": 0.0,
                 "type_errors": 0.0,
@@ -124,6 +127,8 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                     stats["filtered_non_discriminative"] += 1
                 if tv.get("invalid_reason") == "universal_runtime_error":
                     stats["filtered_universal_runtime_error"] += 1
+                if tv.get("invalid_reason") == "low_defined_coverage":
+                    stats["filtered_low_defined_coverage"] += 1
             if step.get("decision") == "ask_and_update":
                 stats["selected_tests"] += 1
                 sel_score = step.get("selected_test_score")
@@ -134,6 +139,12 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
             for gen in step.get("test_generation_stats", []):
                 filt = gen.get("filter_stats", {})
                 stats["filtered_signature_mismatch"] += float(filt.get("signature_mismatch", 0))
+                stats["filtered_keyword_arguments"] += float(
+                    filt.get("keyword_arguments_not_allowed", 0)
+                )
+                stats["filtered_extra_function_calls"] += float(
+                    filt.get("extra_function_calls", 0)
+                )
                 stats["filter_assert_lines"] += float(filt.get("assert_lines", 0))
                 stats["filter_accepted"] += float(filt.get("accepted", 0))
 
@@ -153,7 +164,10 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 "selected_zero_score_frac": s["zero_score_selected"] / selected,
                 "filtered_non_discriminative": int(s["filtered_non_discriminative"]),
                 "filtered_universal_runtime_error": int(s["filtered_universal_runtime_error"]),
+                "filtered_low_defined_coverage": int(s["filtered_low_defined_coverage"]),
                 "filtered_signature_mismatch": int(s["filtered_signature_mismatch"]),
+                "filtered_keyword_arguments": int(s["filtered_keyword_arguments"]),
+                "filtered_extra_function_calls": int(s["filtered_extra_function_calls"]),
                 "signature_mismatch_rate": s["filtered_signature_mismatch"] / asserted,
                 "accepted_assert_rate": s["filter_accepted"] / asserted,
                 "adapter_applied_rate": s["adapter_applied_count"] / run_count,

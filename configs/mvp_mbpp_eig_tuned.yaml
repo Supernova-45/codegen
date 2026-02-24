@@ -45,6 +45,9 @@ pipeline:
   reprompt_max_false_rate: 0.75
   reprompt_max_runtime_error_rate: 0.25
   reprompt_min_constraint_match_rate: 0.75
+  eig_discriminative_weight: 0.5
+  eig_runtime_error_penalty: 0.6
+  undefined_outcome_likelihood: 0.85
   sandbox_timeout_s: 3
 
 output:

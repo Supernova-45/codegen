@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
+TestOutcome = bool | None
+
 
 @dataclass
 class ParticlePosterior:
@@ -30,33 +32,84 @@ class ParticlePosterior:
             return
         self.weights = [w / z for w in self.weights]
 
-    def update(self, outcomes: list[bool], observed: bool, epsilon: float) -> None:
+    def update(
+        self,
+        outcomes: list[TestOutcome],
+        observed: bool,
+        epsilon: float,
+        undefined_likelihood: float = 1.0,
+    ) -> None:
         new_weights: list[float] = []
         for w, outcome in zip(self.weights, outcomes, strict=True):
-            p = (1.0 - epsilon) if outcome == observed else epsilon
+            p = self._likelihood_for_observation(
+                outcome,
+                observed=observed,
+                epsilon=epsilon,
+                undefined_likelihood=undefined_likelihood,
+            )
             new_weights.append(w * p)
         self.weights = new_weights
         self.normalize()
 
-    def expected_map_after_question(self, outcomes: list[bool], epsilon: float) -> float:
+    def expected_map_after_question(
+        self,
+        outcomes: list[TestOutcome],
+        epsilon: float,
+        undefined_likelihood: float = 1.0,
+    ) -> float:
         p_obs_true = 0.0
         for w, outcome in zip(self.weights, outcomes, strict=True):
-            p_obs_true += w * ((1 - epsilon) if outcome else epsilon)
+            p_obs_true += w * self._likelihood_for_observation(
+                outcome,
+                observed=True,
+                epsilon=epsilon,
+                undefined_likelihood=undefined_likelihood,
+            )
         p_obs_false = 1.0 - p_obs_true
 
-        post_true = self._posterior_given_observation(outcomes, True, epsilon)
-        post_false = self._posterior_given_observation(outcomes, False, epsilon)
+        post_true = self._posterior_given_observation(
+            outcomes,
+            observed=True,
+            epsilon=epsilon,
+            undefined_likelihood=undefined_likelihood,
+        )
+        post_false = self._posterior_given_observation(
+            outcomes,
+            observed=False,
+            epsilon=epsilon,
+            undefined_likelihood=undefined_likelihood,
+        )
 
         return p_obs_true * max(post_true) + p_obs_false * max(post_false)
 
     def _posterior_given_observation(
-        self, outcomes: list[bool], observed: bool, epsilon: float
+        self,
+        outcomes: list[TestOutcome],
+        observed: bool,
+        epsilon: float,
+        undefined_likelihood: float,
     ) -> list[float]:
         ws: list[float] = []
         for w, outcome in zip(self.weights, outcomes, strict=True):
-            likelihood = (1 - epsilon) if outcome == observed else epsilon
+            likelihood = self._likelihood_for_observation(
+                outcome,
+                observed=observed,
+                epsilon=epsilon,
+                undefined_likelihood=undefined_likelihood,
+            )
             ws.append(w * likelihood)
         z = sum(ws)
         if z <= 0:
             return [1.0 / len(ws)] * len(ws)
         return [x / z for x in ws]
+
+    @staticmethod
+    def _likelihood_for_observation(
+        outcome: TestOutcome,
+        observed: bool,
+        epsilon: float,
+        undefined_likelihood: float,
+    ) -> float:
+        if outcome is None:
+            return undefined_likelihood
+        return (1 - epsilon) if outcome == observed else epsilon

@@ -183,9 +183,11 @@ class OpenAICompatibleClient:
                         "Return exactly one assert per line.\n"
                         "Every output line must start with 'assert '.\n"
                         "Do not emit bare function calls.\n"
+                        "Use positional arguments only; do not use keyword arguments.\n"
                         "No prose, no numbering, no markdown.\n"
                         "Each assert must be standalone and executable by itself.\n"
                         "Use only Python literals in inputs (ints, floats, strings, bools, lists, tuples, dicts).\n"
+                        "Keep each assert in the form: assert <target_call> == <literal_expected_value>.\n"
                         "Do not use helper variables, random values, external files, or extra function calls.\n"
                         "Do not reference any names except the target function.\n"
                         "Use this exact function-call shape when writing asserts:\n"
@@ -242,6 +244,8 @@ def _filter_assert_lines(
         "invalid_assert_syntax": 0,
         "wrong_function_name": 0,
         "signature_mismatch": 0,
+        "keyword_arguments_not_allowed": 0,
+        "extra_function_calls": 0,
     }
     for line in lines:
         if line in seen:
@@ -281,8 +285,13 @@ def _is_valid_assert_line(
     calls = _find_target_calls(stmt.test, function_name=function_name)
     if len(calls) != 1:
         return False, "wrong_function_name"
-    if expected_arity is not None and len(calls[0].args) != expected_arity:
+    target_call = calls[0]
+    if target_call.keywords:
+        return False, "keyword_arguments_not_allowed"
+    if expected_arity is not None and len(target_call.args) != expected_arity:
         return False, "signature_mismatch"
+    if _has_non_target_call(stmt.test, target_call):
+        return False, "extra_function_calls"
     return True, "accepted"
 
 
@@ -294,3 +303,10 @@ def _find_target_calls(expr: ast.AST, function_name: str) -> list[ast.Call]:
         if isinstance(node.func, ast.Name) and node.func.id == function_name:
             calls.append(node)
     return calls
+
+
+def _has_non_target_call(expr: ast.AST, target_call: ast.Call) -> bool:
+    for node in ast.walk(expr):
+        if isinstance(node, ast.Call) and node is not target_call:
+            return True
+    return False

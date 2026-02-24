@@ -4,4 +4,6 @@ __pycache__/
 .env
 results/*.jsonl
 results/*.csv
+results/*/*.jsonl
+results/*/*.csv
 data/mbpp_variants.jsonl

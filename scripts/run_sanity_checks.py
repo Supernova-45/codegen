@@ -10,6 +10,8 @@ sys.path.insert(0, str(ROOT / "src"))
 from config import PipelineConfig
 from data.mbpp_loader import MBPPTask
 from execution.sandbox import run_assertion
+from posterior.particle_posterior import ParticlePosterior
+from query.eig_selector import select_max_eig
 import pipeline.run_problem as run_problem_module
 
 
@@ -35,8 +37,10 @@ class FakeModel:
         temperature: float | None = None,
     ) -> tuple[list[str], object]:
         del prompt, function_name, signature_hint, visible_tests, constraints, temperature
-        code = "def foo(x):\n    return x\n"
-        return [code for _ in range(n)], _Usage()
+        code_a = "def foo(x):\n    return x\n"
+        code_b = "def foo(x):\n    return x + 1\n"
+        outs = [code_a if i % 2 == 0 else code_b for i in range(n)]
+        return outs, _Usage()
 
     def generate_candidate_tests(
         self,
@@ -96,6 +100,46 @@ class FakeRepromptModel:
         return ["assert foo(1) == 1"], _Usage(), {"accepted": 1, "assert_lines": 1, "raw_lines": 1}
 
 
+class FakeDuplicateModel:
+    def __init__(self) -> None:
+        self._trace: list[dict[str, object]] = []
+        self.test_calls = 0
+
+    def clear_trace(self) -> None:
+        self._trace = []
+
+    def get_trace(self) -> list[dict[str, object]]:
+        return list(self._trace)
+
+    def generate_code_candidates(
+        self,
+        prompt: str,
+        n: int,
+        function_name: str | None = None,
+        signature_hint: str | None = None,
+        visible_tests: list[str] | None = None,
+        constraints: list[tuple[str, bool]] | None = None,
+        temperature: float | None = None,
+    ) -> tuple[list[str], object]:
+        del prompt, n, function_name, signature_hint, visible_tests, constraints, temperature
+        code = "def foo(x):\n    return 1\n"
+        return [code], _Usage()
+
+    def generate_candidate_tests(
+        self,
+        prompt: str,
+        function_name: str | None,
+        signature_hint: str | None,
+        expected_arity: int | None,
+        asked_tests: list[str],
+        visible_tests: list[str] | None,
+        n_tests: int,
+    ) -> tuple[list[str], object, dict[str, int]]:
+        del prompt, function_name, signature_hint, expected_arity, asked_tests, visible_tests, n_tests
+        self.test_calls += 1
+        return [], _Usage(), {"accepted": 0, "assert_lines": 0, "raw_lines": 0}
+
+
 class _Usage:
     prompt_tokens = 0
     completion_tokens = 0
@@ -125,6 +169,9 @@ def _base_cfg() -> PipelineConfig:
         reprompt_max_false_rate=0.75,
         reprompt_max_runtime_error_rate=0.25,
         reprompt_min_constraint_match_rate=0.75,
+        eig_discriminative_weight=0.35,
+        eig_runtime_error_penalty=0.5,
+        undefined_outcome_likelihood=0.85,
         sandbox_timeout_s=3,
     )
 
@@ -237,11 +284,69 @@ def check_reprompt_fallback_on_constraint_mismatch() -> None:
         raise AssertionError(f"unexpected reprompt decision: {reprompt.get('decision')}")
 
 
+def check_selector_penalizes_runtime_heavy_tests() -> None:
+    posterior = ParticlePosterior.uniform(["a", "b", "c"])
+    tests = ["assert foo(1) == 1", "assert foo(2) == 2"]
+    outcomes = [
+        [True, False, None],
+        [True, False, False],
+    ]
+    _, scores, details = select_max_eig(
+        tests,
+        outcomes,
+        posterior,
+        epsilon=0.02,
+        undefined_likelihood=0.85,
+        discriminative_weight=0.5,
+        runtime_error_penalty=0.6,
+    )
+    if not (scores[1] > scores[0]):
+        raise AssertionError(
+            "expected runtime-heavier test to have lower composite score: "
+            f"scores={scores}, details={details}"
+        )
+
+
+def check_posterior_soft_updates_on_undefined() -> None:
+    posterior = ParticlePosterior.uniform(["a", "b"])
+    posterior.update(
+        [None, True],
+        observed=True,
+        epsilon=0.02,
+        undefined_likelihood=0.85,
+    )
+    if not (posterior.weights[1] > posterior.weights[0] > 0.0):
+        raise AssertionError(f"unexpected posterior weights after undefined-aware update: {posterior.weights}")
+
+
+def check_single_unique_candidate_short_circuit() -> None:
+    model = FakeDuplicateModel()
+    cfg = _base_cfg()
+    cfg.run_reprompt = False
+    result = run_problem_module.run_problem(
+        task=_task(),
+        strategy="eig-tests",
+        model=model,
+        cfg=cfg,
+        seed=42,
+    )
+    if result.questions_asked != 0:
+        raise AssertionError("expected no questions when only one unique candidate is available")
+    if model.test_calls != 0:
+        raise AssertionError("test generation should not run in single-unique-candidate path")
+    steps = [x.get("step") for x in result.interaction_trace]
+    if "single_unique_candidate_submit" not in steps:
+        raise AssertionError("missing single_unique_candidate_submit trace step")
+
+
 def main() -> None:
     checks = [
         ("sandbox_builtins", check_sandbox_builtins),
         ("eig_regen_retries", check_eig_regen_retries),
         ("reprompt_fallback", check_reprompt_fallback_on_constraint_mismatch),
+        ("selector_runtime_penalty", check_selector_penalizes_runtime_heavy_tests),
+        ("posterior_undefined_update", check_posterior_soft_updates_on_undefined),
+        ("single_unique_short_circuit", check_single_unique_candidate_short_circuit),
     ]
     for name, check in checks:
         check()
