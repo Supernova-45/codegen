@@ -107,3 +107,15 @@ python scripts/summarize_results.py \
 Additional MBPP+ summary output:
 - `results/summary_mbppplus_pass_at_1.csv`
 - `results/summary_eig_diagnostics.csv`
+
+## References
+
+- **Shoot First, Ask Questions Later? Building Rational Agents that Explore and Act Like People**  
+  Gabriel Grand, Valerio Pepe, Jacob Andreas, Joshua B. Tenenbaum (2025-10-23)  
+  https://arxiv.org/pdf/2510.20886
+- **LLM-Based Test-Driven Interactive Code Generation: User Study and Empirical Evaluation**  
+  Sarah Fakhoury, Aaditya Naik, Georgios Sakkas, Saikat Chakraborty, Shuvendu K. Lahiri (2024-04-15)  
+  https://arxiv.org/pdf/2404.10100
+- **When Prompts Go Wrong: Evaluating Code Model Robustness to Ambiguous, Contradictory, and Incomplete Task Descriptions**  
+  Maya Larbi, Amal Akli, Mike Papadakis, Rihab Bouyousfi, Maxime Cordy, Federica Sarro, Yves Le Traon (2025-07-27)  
+  https://arxiv.org/pdf/2507.20439
