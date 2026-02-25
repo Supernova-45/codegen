@@ -110,26 +110,41 @@ Additional MBPP+ summary output:
 
 ## Preliminary Results
 
+Using the following config:
+- `gamma=0.95`
+- `min_questions_if_valid=2`
+- `filter_non_discriminative=true`
+- `min_valid_candidate_coverage=0.5`
+- `disable_voi_stop=false`
+- `force_full_question_budget=false`
+- `k_max=4`
+- `run_reprompt=true`
+- `shared_test_pool=true`
+- `shared_test_pool_size=24`
+- `shared_test_pool_regen_rounds=1`
+- `skip_posterior_update_on_undefined_oracle=true` 
+
+Here are the results:
 
 | strategy | n | pass@1 | MBPP+ pass@1 | MBPP+ n | avg_questions | avg_total_tokens |
 |---|---:|---:|---:|---:|---:|---:|
-| eig-tests | 30 | 0.767 | 0.000 | 21 | 1.867 | 9626.1 |
-| one-shot | 30 | 0.633 | 0.000 | 21 | 0.000 | 209.1 |
-| random-tests | 30 | 0.700 | 0.000 | 21 | 2.200 | 7789.4 |
+| eig-tests | 30 | 0.733 | n/a | 0 | 2.367 | 7961.0 |
+| one-shot | 30 | 0.567 | n/a | 0 | 0.000 | 209.8 |
+| random-tests | 30 | 0.700 | n/a | 0 | 3.333 | 8101.0 |
 
-By condition:
+## By Condition
 
 | condition | strategy | n | pass@1 |
 |---|---|---:|---:|
-| ambiguous | eig-tests | 10 | 0.800 |
-| ambiguous | one-shot | 10 | 0.600 |
-| ambiguous | random-tests | 10 | 0.600 |
+| ambiguous | eig-tests | 10 | 0.700 |
+| ambiguous | one-shot | 10 | 0.500 |
+| ambiguous | random-tests | 10 | 0.700 |
 | incomplete | eig-tests | 10 | 0.700 |
-| incomplete | one-shot | 10 | 0.600 |
+| incomplete | one-shot | 10 | 0.500 |
 | incomplete | random-tests | 10 | 0.700 |
 | original | eig-tests | 10 | 0.800 |
 | original | one-shot | 10 | 0.700 |
-| original | random-tests | 10 | 0.800 |
+| original | random-tests | 10 | 0.700 |
 
 ## References
 

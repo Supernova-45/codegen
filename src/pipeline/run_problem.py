@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import random
 from typing import Any
 
@@ -203,11 +204,43 @@ def run_problem(
         effective_candidates.append(effective)
         candidate_adapters.append(adapter_info.to_dict())
     posterior = ParticlePosterior.uniform(candidates)
-    asked: list[tuple[str, bool]] = []
+    asked_constraints: list[tuple[str, bool]] = []
     asked_details: list[dict[str, Any]] = []
     chosen_tests: list[dict[str, Any]] = []
 
     eig_score_floor = cfg.min_eig_score if strategy == "eig-tests" else None
+    shared_pool_tests: list[str] = []
+    shared_pool_outcomes: list[list[TestOutcome]] = []
+    shared_pool_eval_logs: list[dict[str, Any]] = []
+    shared_pool_generation_stats: list[dict[str, Any]] = []
+    shared_pool_generated_tests: list[str] = []
+    if cfg.shared_test_pool:
+        (
+            shared_pool_tests,
+            shared_pool_outcomes,
+            shared_pool_eval_logs,
+            shared_pool_generation_stats,
+            shared_pool_generated_tests,
+        ) = _build_shared_test_pool(
+            task=task,
+            model=model,
+            cfg=cfg,
+            usage=usage,
+            signature_hint=signature_hint,
+            test_arity=test_arity,
+            effective_candidates=effective_candidates,
+            asked_tests=[],
+        )
+        interaction_trace.append(
+            {
+                "step": "shared_test_pool_generation",
+                "requested_pool_size": max(cfg.tests_per_round, cfg.shared_test_pool_size),
+                "generated_tests": shared_pool_generated_tests,
+                "valid_pool_size": len(shared_pool_tests),
+                "pool_generation_stats": shared_pool_generation_stats,
+                "pool_test_validation": shared_pool_eval_logs,
+            }
+        )
     for round_idx in range(cfg.k_max):
         test_candidates: list[str] = []
         valid_tests: list[str] = []
@@ -215,67 +248,76 @@ def run_problem(
         test_eval_logs: list[dict[str, Any]] = []
         generation_stats: list[dict[str, Any]] = []
         regen_count = 0
-        while True:
-            test_candidates, u_tests, test_filter_stats = model.generate_candidate_tests(
-                task.prompt,
-                function_name=task.function_name,
-                signature_hint=signature_hint,
-                expected_arity=test_arity,
-                asked_tests=[x[0] for x in asked],
-                visible_tests=task.visible_tests,
-                n_tests=cfg.tests_per_round,
-            )
-            usage.prompt_tokens += u_tests.prompt_tokens
-            usage.completion_tokens += u_tests.completion_tokens
-            valid_tests, outcomes_by_test, test_eval_logs = _evaluate_test_matrix(
-                test_candidates,
-                effective_candidates,
-                cfg.sandbox_timeout_s,
-                min_coverage=cfg.min_valid_candidate_coverage,
-                filter_non_discriminative=cfg.filter_non_discriminative,
-                determinism_repeats=cfg.assertion_determinism_repeats,
-            )
-            generation_stats.append(
-                {
-                    "regen_attempt": regen_count,
-                    "filter_stats": test_filter_stats,
-                    "generated_tests": test_candidates,
-                    "valid_count": len(valid_tests),
-                }
-            )
-            if strategy != "eig-tests" or eig_score_floor is None:
-                break
-            if not valid_tests:
-                if regen_count >= cfg.max_test_regen_attempts:
+        if cfg.shared_test_pool:
+            test_candidates = list(shared_pool_tests)
+            valid_tests = list(shared_pool_tests)
+            outcomes_by_test = list(shared_pool_outcomes)
+            if round_idx == 0:
+                test_eval_logs = list(shared_pool_eval_logs)
+                generation_stats = list(shared_pool_generation_stats)
+            regen_count = 0
+        else:
+            while True:
+                test_candidates, u_tests, test_filter_stats = model.generate_candidate_tests(
+                    task.prompt,
+                    function_name=task.function_name,
+                    signature_hint=signature_hint,
+                    expected_arity=test_arity,
+                    asked_tests=[x["test"] for x in asked_details],
+                    visible_tests=task.visible_tests,
+                    n_tests=cfg.tests_per_round,
+                )
+                usage.prompt_tokens += u_tests.prompt_tokens
+                usage.completion_tokens += u_tests.completion_tokens
+                valid_tests, outcomes_by_test, test_eval_logs = _evaluate_test_matrix(
+                    test_candidates,
+                    effective_candidates,
+                    cfg.sandbox_timeout_s,
+                    min_coverage=cfg.min_valid_candidate_coverage,
+                    filter_non_discriminative=cfg.filter_non_discriminative,
+                    determinism_repeats=cfg.assertion_determinism_repeats,
+                )
+                generation_stats.append(
+                    {
+                        "regen_attempt": regen_count,
+                        "filter_stats": test_filter_stats,
+                        "generated_tests": test_candidates,
+                        "valid_count": len(valid_tests),
+                    }
+                )
+                if strategy != "eig-tests" or eig_score_floor is None:
+                    break
+                if not valid_tests:
+                    if regen_count >= cfg.max_test_regen_attempts:
+                        break
+                    regen_count += 1
+                    continue
+                _, regen_scores, regen_details = select_max_eig(
+                    valid_tests,
+                    outcomes_by_test,
+                    posterior,
+                    cfg.epsilon,
+                    undefined_likelihood=cfg.undefined_outcome_likelihood,
+                    discriminative_weight=cfg.eig_discriminative_weight,
+                    runtime_error_penalty=cfg.eig_runtime_error_penalty,
+                )
+                best_score = max(regen_scores) if regen_scores else 0.0
+                high_value_count = sum(1 for s in regen_scores if s >= eig_score_floor)
+                generation_stats[-1]["eig_score_details"] = regen_details
+                generation_stats[-1]["eig_scores"] = regen_scores
+                if (
+                    (best_score >= eig_score_floor and high_value_count >= cfg.eig_questions_per_round)
+                    or regen_count >= cfg.max_test_regen_attempts
+                ):
                     break
                 regen_count += 1
-                continue
-            _, regen_scores, regen_details = select_max_eig(
-                valid_tests,
-                outcomes_by_test,
-                posterior,
-                cfg.epsilon,
-                undefined_likelihood=cfg.undefined_outcome_likelihood,
-                discriminative_weight=cfg.eig_discriminative_weight,
-                runtime_error_penalty=cfg.eig_runtime_error_penalty,
-            )
-            best_score = max(regen_scores) if regen_scores else 0.0
-            high_value_count = sum(1 for s in regen_scores if s >= eig_score_floor)
-            generation_stats[-1]["eig_score_details"] = regen_details
-            generation_stats[-1]["eig_scores"] = regen_scores
-            if (
-                (best_score >= eig_score_floor and high_value_count >= cfg.eig_questions_per_round)
-                or regen_count >= cfg.max_test_regen_attempts
-            ):
-                break
-            regen_count += 1
         round_log: dict[str, Any] = {
             "round": round_idx + 1,
             "generated_tests": test_candidates,
             "test_validation": test_eval_logs,
             "valid_tests": valid_tests,
             "strategy": strategy,
-            "asked_so_far": [x[0] for x in asked],
+            "asked_so_far": [x["test"] for x in asked_details],
             "signature_hint": signature_hint,
             "expected_arity": expected_arity,
             "enforce_test_signature_arity": cfg.enforce_test_signature_arity,
@@ -283,9 +325,14 @@ def run_problem(
             "test_generation_stats": generation_stats,
             "regen_attempts_used": regen_count,
             "candidate_adapter_info": candidate_adapters,
+            "shared_test_pool_enabled": cfg.shared_test_pool,
         }
+        if cfg.shared_test_pool:
+            round_log["shared_pool_remaining"] = len(shared_pool_tests)
         if not valid_tests:
-            round_log["decision"] = "no_valid_tests_stop"
+            round_log["decision"] = (
+                "no_pool_tests_stop" if cfg.shared_test_pool else "no_valid_tests_stop"
+            )
             interaction_trace.append(round_log)
             break
 
@@ -303,18 +350,19 @@ def run_problem(
                 discriminative_weight=cfg.eig_discriminative_weight,
                 runtime_error_penalty=cfg.eig_runtime_error_penalty,
             )
+            candidate_indices = list(range(len(valid_tests)))
             if eig_score_floor is not None:
-                valid_by_score = [i for i, s in enumerate(scores) if s >= eig_score_floor]
-                valid_tests = [valid_tests[i] for i in valid_by_score]
-                outcomes_by_test = [outcomes_by_test[i] for i in valid_by_score]
-                scores = [scores[i] for i in valid_by_score]
-                score_details = [score_details[i] for i in valid_by_score]
-            if not valid_tests:
-                round_log["decision"] = "no_high_value_tests_stop"
-                round_log["eig_score_floor"] = eig_score_floor
-                interaction_trace.append(round_log)
-                break
-            order = sorted(range(len(valid_tests)), key=lambda i: scores[i], reverse=True)
+                candidate_indices = [i for i, s in enumerate(scores) if s >= eig_score_floor]
+            if not candidate_indices:
+                if cfg.force_full_question_budget and scores:
+                    candidate_indices = list(range(len(valid_tests)))
+                    round_log["eig_score_floor_relaxed"] = True
+                else:
+                    round_log["decision"] = "no_high_value_tests_stop"
+                    round_log["eig_score_floor"] = eig_score_floor
+                    interaction_trace.append(round_log)
+                    break
+            order = sorted(candidate_indices, key=lambda i: scores[i], reverse=True)
             selected_indices = order[: max(1, cfg.eig_questions_per_round)]
 
         round_log["asked_in_round"] = []
@@ -337,11 +385,15 @@ def run_problem(
             ask_gate_reason = "forced_min_questions"
             ask_gate = True
             if strategy == "eig-tests":
-                ask_gate = should_ask(p_current, p_next, cfg.gamma)
-                ask_gate_reason = "voi_threshold_met" if ask_gate else "voi_below_threshold"
-                if len(chosen_tests) < cfg.min_questions_if_valid:
+                if cfg.disable_voi_stop or cfg.force_full_question_budget:
                     ask_gate = True
-                    ask_gate_reason = "forced_min_questions"
+                    ask_gate_reason = "voi_gate_disabled"
+                else:
+                    ask_gate = should_ask(p_current, p_next, cfg.gamma)
+                    ask_gate_reason = "voi_threshold_met" if ask_gate else "voi_below_threshold"
+                    if len(chosen_tests) < cfg.min_questions_if_valid:
+                        ask_gate = True
+                        ask_gate_reason = "forced_min_questions"
             if not ask_gate:
                 stop_after_round = True
                 round_log.setdefault("ask_gate", []).append(
@@ -355,21 +407,32 @@ def run_problem(
                 )
                 break
 
-            observed, oracle_error = run_assertion(task.oracle_code, selected_test, cfg.sandbox_timeout_s)
-            oracle_runtime_error = _is_runtime_error(observed, oracle_error)
-            posterior.update(
-                outcomes,
-                observed,
-                cfg.epsilon,
-                undefined_likelihood=cfg.undefined_outcome_likelihood,
+            observed_bool, oracle_error = run_assertion(
+                task.oracle_code,
+                selected_test,
+                cfg.sandbox_timeout_s,
             )
-            asked.append((selected_test, observed))
+            oracle_runtime_error = _is_runtime_error(observed_bool, oracle_error)
+            observed: TestOutcome = None if oracle_runtime_error else observed_bool
+            posterior_updated = True
+            if observed is None and cfg.skip_posterior_update_on_undefined_oracle:
+                posterior_updated = False
+            else:
+                posterior.update(
+                    outcomes,
+                    bool(observed),
+                    cfg.epsilon,
+                    undefined_likelihood=cfg.undefined_outcome_likelihood,
+                )
+            if observed is not None:
+                asked_constraints.append((selected_test, observed))
             asked_details.append(
                 {
                     "test": selected_test,
                     "observed": observed,
                     "oracle_error": oracle_error,
                     "oracle_runtime_error": oracle_runtime_error,
+                    "posterior_updated": posterior_updated,
                 }
             )
             if strategy == "eig-tests":
@@ -392,6 +455,7 @@ def run_problem(
                     "map_expected_after": p_next,
                     "score": selected_score,
                     "score_components": selected_score_detail,
+                    "posterior_updated": posterior_updated,
                 }
             )
             round_log["asked_in_round"].append(
@@ -403,6 +467,7 @@ def run_problem(
                     "map_expected_after": p_next,
                     "oracle_observed": observed,
                     "oracle_error": oracle_error,
+                    "posterior_updated": posterior_updated,
                 }
             )
 
@@ -420,6 +485,15 @@ def run_problem(
             round_log["decision"] = "submit_without_asking"
             stop_after_round = True
 
+        if cfg.shared_test_pool and round_log["asked_in_round"]:
+            asked_this_round = {entry["test"] for entry in round_log["asked_in_round"]}
+            shared_pool_tests, shared_pool_outcomes = _remove_tests_from_pool(
+                shared_pool_tests,
+                shared_pool_outcomes,
+                asked_this_round,
+            )
+            round_log["shared_pool_remaining_after"] = len(shared_pool_tests)
+
         interaction_trace.append(round_log)
         if stop_after_round:
             break
@@ -429,18 +503,19 @@ def run_problem(
     reprompt_log: dict[str, Any] = {
         "step": "reprompt_decision",
         "run_reprompt_enabled": cfg.run_reprompt,
-        "asked_count": len(asked),
+        "asked_count": len(asked_details),
+        "constraint_count": len(asked_constraints),
         "map_candidate_index": map_candidate_index,
         "used_map_candidate_fallback": True,
     }
-    if cfg.run_reprompt and asked:
-        observed_values = [entry["observed"] for entry in asked_details]
+    if cfg.run_reprompt and asked_constraints:
+        observed_values = [x[1] for x in asked_constraints]
         false_rate = sum(1 for v in observed_values if not v) / len(observed_values)
         runtime_error_rate = (
             sum(1 for x in asked_details if x["oracle_runtime_error"]) / len(asked_details)
         )
         reason_codes: list[str] = []
-        if len(asked_details) < cfg.reprompt_min_questions:
+        if len(asked_constraints) < cfg.reprompt_min_questions:
             reason_codes.append("below_min_questions")
         if cfg.reprompt_require_mixed_outcomes and not (
             any(observed_values) and any(not x for x in observed_values)
@@ -459,7 +534,7 @@ def run_problem(
             }
         )
         if not reason_codes:
-            constraints = [(t, a) for t, a in asked]
+            constraints = [(t, a) for t, a in asked_constraints]
             new_code, u = model.generate_code_candidates(
                 task.prompt,
                 n=1,
@@ -482,6 +557,8 @@ def run_problem(
             validation_checks: list[dict[str, Any]] = []
             matched = 0
             for entry in asked_details:
+                if entry["observed"] is None:
+                    continue
                 got_ok, got_error = run_assertion(
                     effective_candidate_code,
                     entry["test"],
@@ -499,7 +576,7 @@ def run_problem(
                         "matches": is_match,
                     }
                 )
-            match_rate = matched / max(1, len(asked_details))
+            match_rate = matched / max(1, len(asked_constraints))
             reprompt_log.update(
                 {
                     "reprompt_attempted": True,
@@ -519,6 +596,9 @@ def run_problem(
                 reprompt_log["reason_codes"] = ["constraint_match_below_threshold"]
         else:
             reprompt_log["decision"] = "skip_reprompt"
+    elif cfg.run_reprompt and asked_details:
+        reprompt_log["decision"] = "skip_reprompt"
+        reprompt_log["reason_codes"] = ["no_defined_clarification_answers"]
     elif cfg.run_reprompt:
         reprompt_log["decision"] = "skip_reprompt"
         reprompt_log["reason_codes"] = ["no_clarification_questions"]
@@ -559,6 +639,99 @@ def _is_runtime_error(ok: bool, error: str) -> bool:
     if ok:
         return False
     return "AssertionError" not in error
+
+
+def _build_shared_test_pool(
+    task: MBPPTask,
+    model: OpenAICompatibleClient,
+    cfg: PipelineConfig,
+    usage: Usage,
+    signature_hint: str | None,
+    test_arity: int | None,
+    effective_candidates: list[str],
+    asked_tests: list[str],
+) -> tuple[
+    list[str],
+    list[list[TestOutcome]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[str],
+]:
+    target_pool_size = max(cfg.tests_per_round, cfg.shared_test_pool_size)
+    max_batches = max(
+        1,
+        math.ceil(target_pool_size / max(1, cfg.tests_per_round)) + cfg.shared_test_pool_regen_rounds,
+    )
+    pool_tests: list[str] = []
+    pool_outcomes: list[list[TestOutcome]] = []
+    seen_tests: set[str] = set(x.strip() for x in asked_tests)
+    all_eval_logs: list[dict[str, Any]] = []
+    generation_stats: list[dict[str, Any]] = []
+    generated_tests: list[str] = []
+    for batch_idx in range(max_batches):
+        request_count = max(1, cfg.tests_per_round)
+        test_candidates, u_tests, test_filter_stats = model.generate_candidate_tests(
+            task.prompt,
+            function_name=task.function_name,
+            signature_hint=signature_hint,
+            expected_arity=test_arity,
+            asked_tests=list(seen_tests),
+            visible_tests=task.visible_tests,
+            n_tests=request_count,
+        )
+        usage.prompt_tokens += u_tests.prompt_tokens
+        usage.completion_tokens += u_tests.completion_tokens
+        generated_tests.extend(test_candidates)
+        valid_tests, outcomes_by_test, test_eval_logs = _evaluate_test_matrix(
+            test_candidates,
+            effective_candidates,
+            cfg.sandbox_timeout_s,
+            min_coverage=cfg.min_valid_candidate_coverage,
+            filter_non_discriminative=cfg.filter_non_discriminative,
+            determinism_repeats=cfg.assertion_determinism_repeats,
+        )
+        all_eval_logs.extend(test_eval_logs)
+        unique_added = 0
+        for test, outcomes in zip(valid_tests, outcomes_by_test, strict=True):
+            key = test.strip()
+            if key in seen_tests:
+                continue
+            seen_tests.add(key)
+            pool_tests.append(test)
+            pool_outcomes.append(outcomes)
+            unique_added += 1
+            if len(pool_tests) >= target_pool_size:
+                break
+        generation_stats.append(
+            {
+                "pool_batch": batch_idx,
+                "filter_stats": test_filter_stats,
+                "generated_tests": test_candidates,
+                "valid_count": len(valid_tests),
+                "valid_unique_added": unique_added,
+                "pool_size_after_batch": len(pool_tests),
+            }
+        )
+        if len(pool_tests) >= target_pool_size:
+            break
+    return pool_tests, pool_outcomes, all_eval_logs, generation_stats, generated_tests
+
+
+def _remove_tests_from_pool(
+    tests: list[str],
+    outcomes: list[list[TestOutcome]],
+    remove_tests: set[str],
+) -> tuple[list[str], list[list[TestOutcome]]]:
+    if not remove_tests:
+        return tests, outcomes
+    keep_tests: list[str] = []
+    keep_outcomes: list[list[TestOutcome]] = []
+    for test, outcome in zip(tests, outcomes, strict=True):
+        if test in remove_tests:
+            continue
+        keep_tests.append(test)
+        keep_outcomes.append(outcome)
+    return keep_tests, keep_outcomes
 
 
 def _evaluate_test_matrix(

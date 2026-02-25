@@ -1,0 +1,60 @@
+experiment_name: mvp_mbpp_ticoder_ab
+seed: 42
+max_examples: 5
+shuffle: false
+
+dataset:
+  variants_path: data/mbpp_variants.jsonl
+  conditions:
+    - original
+  mbppplus:
+    enabled: false
+    dataset: evalplus/mbppplus
+    split: test
+    timeout_s: 15
+
+model:
+  base_url_env: CLARIFYCODE_BASE_URL
+  api_key_env: CLARIFYCODE_API_KEY
+  model_env: CLARIFYCODE_MODEL
+  temperature: 0.8
+  request_timeout_s: 90
+
+pipeline:
+  strategy: eig-tests
+  n_candidates: 16
+  tests_per_round: 16
+  k_max: 5
+  epsilon: 0.02
+  gamma: 0.85
+  min_questions_if_valid: 1
+  min_valid_candidate_coverage: 0.6
+  enforce_test_signature_arity: true
+  filter_non_discriminative: true
+  min_eig_score: 0.0
+  max_test_regen_attempts: 2
+  eig_questions_per_round: 1
+  candidate_temperature: 0.7
+  reprompt_temperature: 0.1
+  eval_with_adapter: true
+  run_reprompt: false
+  reprompt_min_questions: 2
+  reprompt_require_mixed_outcomes: true
+  reprompt_max_false_rate: 0.75
+  reprompt_max_runtime_error_rate: 0.25
+  reprompt_min_constraint_match_rate: 0.75
+  eig_discriminative_weight: 0.5
+  eig_runtime_error_penalty: 0.6
+  undefined_outcome_likelihood: 0.85
+  assertion_determinism_repeats: 1
+  skip_posterior_update_on_undefined_oracle: true
+  disable_voi_stop: true
+  force_full_question_budget: true
+  shared_test_pool: true
+  shared_test_pool_size: 64
+  shared_test_pool_regen_rounds: 4
+  sandbox_timeout_s: 3
+
+output:
+  results_dir: results
+  output_file: mvp_mbpp_ticoder_ab.jsonl

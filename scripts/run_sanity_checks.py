@@ -173,6 +173,12 @@ def _base_cfg() -> PipelineConfig:
         eig_runtime_error_penalty=0.5,
         undefined_outcome_likelihood=0.85,
         assertion_determinism_repeats=2,
+        skip_posterior_update_on_undefined_oracle=True,
+        disable_voi_stop=False,
+        force_full_question_budget=False,
+        shared_test_pool=False,
+        shared_test_pool_size=32,
+        shared_test_pool_regen_rounds=1,
         sandbox_timeout_s=3,
     )
 

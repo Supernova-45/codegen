@@ -56,12 +56,28 @@ class OpenAICompatibleClient:
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
-            resp = requests.post(
-                f"{self.cfg.base_url.rstrip('/')}/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=self.cfg.request_timeout_s,
-            )
+            try:
+                resp = requests.post(
+                    f"{self.cfg.base_url.rstrip('/')}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=self.cfg.request_timeout_s,
+                )
+            except requests.RequestException as exc:
+                attempts.append(
+                    {
+                        "attempt": attempt + 1,
+                        "status_code": None,
+                        "key_slot": key_slot,
+                        "error": type(exc).__name__,
+                        "error_message": str(exc),
+                    }
+                )
+                if attempt < max_attempts - 1:
+                    sleep_s = min(30.0, float(2**attempt) + random.uniform(0.0, 0.5))
+                    time.sleep(sleep_s)
+                    continue
+                raise
             attempts.append(
                 {
                     "attempt": attempt + 1,

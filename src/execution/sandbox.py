@@ -3,6 +3,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import queue
 from typing import Any
+import warnings
 
 
 ALLOWED_IMPORTS = {
@@ -26,6 +27,9 @@ def _safe_import(name: str, globals_: Any = None, locals_: Any = None, fromlist:
 
 
 def _run_in_child(code: str, test: str, q: mp.Queue) -> None:
+    # Generated snippets occasionally include invalid escape sequences like "\d";
+    # suppress syntax warnings to keep long-run logs readable.
+    warnings.filterwarnings("ignore", category=SyntaxWarning)
     safe_builtins = {
         "abs": abs,
         "all": all,

@@ -46,6 +46,12 @@ class PipelineConfig:
     eig_runtime_error_penalty: float
     undefined_outcome_likelihood: float
     assertion_determinism_repeats: int
+    skip_posterior_update_on_undefined_oracle: bool
+    disable_voi_stop: bool
+    force_full_question_budget: bool
+    shared_test_pool: bool
+    shared_test_pool_size: int
+    shared_test_pool_regen_rounds: int
     sandbox_timeout_s: int
 
 
@@ -152,6 +158,14 @@ def load_config(path: str) -> ExperimentConfig:
             1,
             int(pipeline.get("assertion_determinism_repeats", 2)),
         ),
+        skip_posterior_update_on_undefined_oracle=bool(
+            pipeline.get("skip_posterior_update_on_undefined_oracle", True)
+        ),
+        disable_voi_stop=bool(pipeline.get("disable_voi_stop", False)),
+        force_full_question_budget=bool(pipeline.get("force_full_question_budget", False)),
+        shared_test_pool=bool(pipeline.get("shared_test_pool", False)),
+        shared_test_pool_size=max(1, int(pipeline.get("shared_test_pool_size", 64))),
+        shared_test_pool_regen_rounds=max(0, int(pipeline.get("shared_test_pool_regen_rounds", 2))),
         sandbox_timeout_s=int(pipeline["sandbox_timeout_s"]),
     )
 
