@@ -45,6 +45,7 @@ class PipelineConfig:
     eig_discriminative_weight: float
     eig_runtime_error_penalty: float
     undefined_outcome_likelihood: float
+    assertion_determinism_repeats: int
     sandbox_timeout_s: int
 
 
@@ -146,6 +147,10 @@ def load_config(path: str) -> ExperimentConfig:
             float(pipeline.get("undefined_outcome_likelihood", 0.85)),
             0.0,
             1.0,
+        ),
+        assertion_determinism_repeats=max(
+            1,
+            int(pipeline.get("assertion_determinism_repeats", 2)),
         ),
         sandbox_timeout_s=int(pipeline["sandbox_timeout_s"]),
     )

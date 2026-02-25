@@ -172,6 +172,7 @@ def _base_cfg() -> PipelineConfig:
         eig_discriminative_weight=0.35,
         eig_runtime_error_penalty=0.5,
         undefined_outcome_likelihood=0.85,
+        assertion_determinism_repeats=2,
         sandbox_timeout_s=3,
     )
 

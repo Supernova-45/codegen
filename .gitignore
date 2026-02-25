@@ -6,4 +6,5 @@ results/*.jsonl
 results/*.csv
 results/*/*.jsonl
 results/*/*.csv
+logs/
 data/mbpp_variants.jsonl

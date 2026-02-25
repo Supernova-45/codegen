@@ -233,6 +233,7 @@ def run_problem(
                 cfg.sandbox_timeout_s,
                 min_coverage=cfg.min_valid_candidate_coverage,
                 filter_non_discriminative=cfg.filter_non_discriminative,
+                determinism_repeats=cfg.assertion_determinism_repeats,
             )
             generation_stats.append(
                 {
@@ -566,6 +567,7 @@ def _evaluate_test_matrix(
     timeout_s: int,
     min_coverage: float,
     filter_non_discriminative: bool,
+    determinism_repeats: int,
 ) -> tuple[list[str], list[list[TestOutcome]], list[dict[str, Any]]]:
     valid_tests: list[str] = []
     matrix: list[list[TestOutcome]] = []
@@ -579,8 +581,11 @@ def _evaluate_test_matrix(
         runtime_error_runs = 0
         defined_runs = 0
         for code in candidates:
-            ok1, err1 = run_assertion(code, test, timeout_s)
-            ok2, err2 = run_assertion(code, test, timeout_s)
+            checks: list[tuple[bool, str]] = []
+            for _ in range(max(1, determinism_repeats)):
+                checks.append(run_assertion(code, test, timeout_s))
+            ok1, err1 = checks[0]
+            ok2, err2 = checks[1] if len(checks) > 1 else (ok1, err1)
             candidate_outcome = "runtime_error"
             if ok1 and ok2:
                 candidate_outcome = "pass"
@@ -593,13 +598,15 @@ def _evaluate_test_matrix(
                     "first_error": err1,
                     "second_error": err2,
                     "candidate_outcome": candidate_outcome,
+                    "run_count": len(checks),
                 }
             )
-            if err1 == "Timeout" or err2 == "Timeout":
+            if any(err == "Timeout" for _, err in checks):
                 valid = False
                 invalid_reason = "timeout"
                 break
-            if ok1 != ok2:
+            first_ok = checks[0][0]
+            if any(ok != first_ok for ok, _ in checks[1:]):
                 valid = False
                 invalid_reason = "non_deterministic"
                 break

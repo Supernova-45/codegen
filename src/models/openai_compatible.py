@@ -23,9 +23,12 @@ class Usage:
 
 
 class OpenAICompatibleClient:
-    def __init__(self, cfg: ModelConfig) -> None:
+    def __init__(self, cfg: ModelConfig, api_keys: list[str] | None = None) -> None:
         self.cfg = cfg
         self._trace_events: list[dict[str, Any]] = []
+        normalized_keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
+        self._api_keys = normalized_keys if normalized_keys else [cfg.api_key]
+        self._key_cursor = 0
 
     def clear_trace(self) -> None:
         self._trace_events = []
@@ -44,21 +47,28 @@ class OpenAICompatibleClient:
             "messages": messages,
             "temperature": self.cfg.temperature if temperature is None else temperature,
         }
-        headers = {
-            "Authorization": f"Bearer {self.cfg.api_key}",
-            "Content-Type": "application/json",
-        }
         data: dict[str, Any] | None = None
         max_attempts = 6
         attempts: list[dict[str, Any]] = []
         for attempt in range(max_attempts):
+            key_slot, api_key = self._acquire_api_key()
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
             resp = requests.post(
                 f"{self.cfg.base_url.rstrip('/')}/chat/completions",
                 json=payload,
                 headers=headers,
                 timeout=self.cfg.request_timeout_s,
             )
-            attempts.append({"attempt": attempt + 1, "status_code": resp.status_code})
+            attempts.append(
+                {
+                    "attempt": attempt + 1,
+                    "status_code": resp.status_code,
+                    "key_slot": key_slot,
+                }
+            )
             if resp.status_code in {429, 500, 502, 503, 504} and attempt < max_attempts - 1:
                 retry_after = resp.headers.get("Retry-After")
                 if retry_after and retry_after.isdigit():
@@ -100,6 +110,11 @@ class OpenAICompatibleClient:
             prompt_tokens=int(usage.get("prompt_tokens", 0)),
             completion_tokens=int(usage.get("completion_tokens", 0)),
         )
+
+    def _acquire_api_key(self) -> tuple[int, str]:
+        slot = self._key_cursor % len(self._api_keys)
+        self._key_cursor += 1
+        return slot, self._api_keys[slot]
 
     def generate_code_candidates(
         self,
