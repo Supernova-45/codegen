@@ -13,6 +13,7 @@ from models.openai_compatible import OpenAICompatibleClient, Usage
 from posterior.particle_posterior import ParticlePosterior, TestOutcome
 from query.ask_or_submit import should_ask
 from query.eig_selector import select_max_eig
+from query.ticode_selector import ticode_scores
 
 
 @dataclass
@@ -71,7 +72,7 @@ def run_problem(
     signature_hint, expected_arity = infer_signature_hint(task.visible_tests, task.function_name)
     test_arity = expected_arity if cfg.enforce_test_signature_arity else None
 
-    if strategy not in {"one-shot", "random-tests", "eig-tests"}:
+    if strategy not in {"one-shot", "random-tests", "eig-tests", "ticode-tests"}:
         raise ValueError(f"Unsupported strategy: {strategy}")
 
     if strategy == "one-shot":
@@ -203,6 +204,22 @@ def run_problem(
         )
         effective_candidates.append(effective)
         candidate_adapters.append(adapter_info.to_dict())
+
+    if strategy == "ticode-tests":
+        return _run_ticode_tests(
+            task=task,
+            cfg=cfg,
+            model=model,
+            usage=usage,
+            interaction_trace=interaction_trace,
+            signature_hint=signature_hint,
+            expected_arity=expected_arity,
+            test_arity=test_arity,
+            candidates=candidates,
+            effective_candidates=effective_candidates,
+            candidate_adapters=candidate_adapters,
+        )
+    
     posterior = ParticlePosterior.uniform(candidates)
     asked_constraints: list[tuple[str, bool]] = []
     asked_details: list[dict[str, Any]] = []
@@ -842,3 +859,203 @@ def _dedupe_candidates(candidates: list[str]) -> list[str]:
         seen.add(key)
         unique.append(code)
     return unique
+
+def _ticode_rank_alive_by_passing_tests(
+    keep_indices: list[int],
+    effective_candidates: list[str],
+    asked_tests: list[dict[str, Any]],
+    timeout_s: int,
+) -> list[int]:
+    """TiCoder paper: rank alive candidates by d_c = number of asked tests they pass."""
+    if not asked_tests:
+        return list(keep_indices)
+    pass_counts: list[int] = []
+    for idx in keep_indices:
+        code = effective_candidates[idx]
+        count = 0
+        for entry in asked_tests:
+            test = entry.get("test", "")
+            if not test:
+                continue
+            ok, _ = run_assertion(code, test, timeout_s)
+            if ok:
+                count += 1
+        pass_counts.append(count)
+    order = sorted(range(len(keep_indices)), key=lambda i: pass_counts[i], reverse=True)
+    return [keep_indices[i] for i in order]
+
+def _run_ticode_tests(
+    task: MBPPTask,
+    cfg: PipelineConfig,
+    model: OpenAICompatibleClient,
+    usage: Usage,
+    interaction_trace: list[dict[str, Any]],
+    signature_hint: str | None,
+    expected_arity: int | None,
+    test_arity: int | None,
+    candidates: list[str],
+    effective_candidates: list[str],
+    candidate_adapters: list[dict[str, Any]],
+) -> ProblemResult:
+    keep_indices = list(range(len(candidates)))
+    chosen_tests = []
+    already_asked = []
+
+    for round_idx in range(cfg.k_max):
+        if len(keep_indices) <= 1:
+            break
+
+        test_candidates, u_tests, test_filter_stats = model.generate_candidate_tests(
+            task.prompt,
+            function_name=task.function_name,
+            signature_hint=signature_hint,
+            expected_arity=test_arity,
+            asked_tests=[x["test"] for x in already_asked],
+            visible_tests=task.visible_tests,
+            n_tests=cfg.tests_per_round,
+        )
+        usage.prompt_tokens += u_tests.prompt_tokens
+        usage.completion_tokens += u_tests.completion_tokens
+
+        valid_tests, outcomes_by_test, test_eval_logs = _evaluate_test_matrix(
+            test_candidates,
+            effective_candidates,
+            cfg.sandbox_timeout_s,
+            min_coverage=cfg.min_valid_candidate_coverage,
+            filter_non_discriminative=cfg.filter_non_discriminative,
+            determinism_repeats=cfg.assertion_determinism_repeats,
+        )
+
+        round_log: dict[str, Any] = {
+            "round": round_idx + 1,
+            "generated_tests": test_candidates,
+            "test_validation": test_eval_logs,
+            "valid_tests": valid_tests,
+            "strategy": "ticode-tests",
+            "asked_so_far": [x["test"] for x in already_asked],
+            "signature_hint": signature_hint,
+            "expected_arity": expected_arity,
+            "enforce_test_signature_arity": cfg.enforce_test_signature_arity,
+            "filter_non_discriminative": cfg.filter_non_discriminative,
+            "candidate_adapter_info": candidate_adapters,
+        }
+
+        if not valid_tests:
+            round_log["decision"] = "no_valid_tests_stop"
+            interaction_trace.append(round_log)
+            break
+
+        scores = ticode_scores(outcomes_by_test, keep_indices)
+        best_idx = max(range(len(scores)), key=lambda i: scores[i])
+        if scores[best_idx] <= 0.0:
+            round_log["decision"] = "no_discriminative_tests_stop"
+            interaction_trace.append(round_log)
+            break
+
+        selected_test = valid_tests[best_idx]
+        selected_outcomes = outcomes_by_test[best_idx]
+        selected_score = scores[best_idx]
+
+        observed_bool, oracle_error = run_assertion(
+            task.oracle_code,
+            selected_test,
+            cfg.sandbox_timeout_s,
+        )
+        oracle_runtime_error = _is_runtime_error(observed_bool, oracle_error)
+
+        if oracle_runtime_error:
+            observed: TestOutcome = None
+        else:
+            observed = observed_bool
+
+        new_keep = []
+        if observed is not None:
+            for idx in keep_indices:
+                out = selected_outcomes[idx]
+                if out is True or out is False:
+                    if out == observed:
+                        new_keep.append(idx)
+        else:
+            new_keep = list(keep_indices)
+
+        keep_indices = new_keep
+
+        already_asked.append(
+            {
+                "test": selected_test,
+                "observed": observed,
+                "oracle_error": oracle_error,
+                "oracle_runtime_error": oracle_runtime_error,
+            }
+        )
+        chosen_tests.append(
+            {
+                "test": selected_test,
+                "observed": observed,
+                "oracle_error": oracle_error,
+                "oracle_runtime_error": oracle_runtime_error,
+                "score": selected_score,
+                "score_components": {"ticode_discriminative_score": selected_score},
+            }
+        )
+        round_log["asked_in_round"] = [
+            {
+                "test": selected_test,
+                "score": selected_score,
+                "score_components": {"ticode_discriminative_score": selected_score},
+                "oracle_observed": observed,
+                "oracle_error": oracle_error,
+            }
+        ]
+        round_log["selected_test"] = selected_test
+        round_log["selected_test_score"] = selected_score
+        round_log["decision"] = "ask_and_prune"
+        round_log["alive_candidate_count_after"] = len(keep_indices)
+        interaction_trace.append(round_log)
+
+        if len(keep_indices) <= 1:
+            break
+
+    if keep_indices:
+        ranked = _ticode_rank_alive_by_passing_tests(
+            keep_indices=keep_indices,
+            effective_candidates=effective_candidates,
+            asked_tests=already_asked,
+            timeout_s=cfg.sandbox_timeout_s,
+        )
+        final_index = ranked[0]
+    else:
+        final_index = 0
+
+    final_code = candidates[final_index]
+    effective_final_code, final_adapter_info = build_effective_code(
+        final_code,
+        expected_function_name=task.function_name,
+        expected_arity=expected_arity,
+        enabled=cfg.eval_with_adapter,
+    )
+    passed, total, errors = run_tests(
+        effective_final_code,
+        task.hidden_tests,
+        cfg.sandbox_timeout_s,
+    )
+
+    return ProblemResult(
+        task_id=task.task_id,
+        condition=task.condition,
+        strategy="ticode-tests",
+        pass_at_1=passed == total,
+        questions_asked=len(chosen_tests),
+        chosen_tests=chosen_tests,
+        total_prompt_tokens=usage.prompt_tokens,
+        total_completion_tokens=usage.completion_tokens,
+        final_code=final_code,
+        eval_passed=passed,
+        eval_total=total,
+        eval_errors=errors,
+        adapter_info=final_adapter_info.to_dict(),
+        mbppplus_pass_at_1=None,
+        mbppplus_error=None,
+        interaction_trace=interaction_trace,
+        model_trace=model.get_trace(),
+    )
