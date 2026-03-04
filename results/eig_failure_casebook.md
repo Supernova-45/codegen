@@ -4,6 +4,13 @@ Source: `results/strict_eval_final.jsonl` (strategy=`eig-tests`, failures only).
 
 This casebook is intended to diagnose why EIG underperforms by showing prompts, asked vs unasked candidate tests, and resulting code/errors.
 
+## Cross-Cutting Failure Modes (for final writeup)
+
+- **Signature drift:** prompts underspecify argument order/types, causing interface-mismatched solutions that clarification tests do not reliably correct.
+- **Low-value questions:** high-score tests can still be semantically weak if they probe shallow cases or duplicate prior constraints.
+- **Test-generation bottlenecks:** invalid/non-discriminative/redundant generated tests reduce effective oracle interactions per token.
+- **Shared blind spots in candidate pool:** if most sampled candidates encode the same incorrect assumption, posterior updates cannot recover.
+
 ## Case 1: Task 5 (ambiguous)
 
 - Outcome: `pass_at_1=False`; eval `0/2`; questions asked `3`

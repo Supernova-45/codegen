@@ -46,6 +46,7 @@ def build_task_rows(
     original: list[dict[str, Any]],
     incomplete: list[dict[str, Any]],
     ambiguous: list[dict[str, Any]],
+    contradictory: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     oracle_by_task = {int(x["task_id"]): x for x in ticode_mbpp}
     cond_maps = {
@@ -53,6 +54,8 @@ def build_task_rows(
         "incomplete": {int(x["task_id"]): x for x in incomplete},
         "ambiguous": {int(x["task_id"]): x for x in ambiguous},
     }
+    if contradictory:
+        cond_maps["contradictory"] = {int(x["task_id"]): x for x in contradictory}
 
     rows: list[dict[str, Any]] = []
     for task_id, oracle_row in sorted(oracle_by_task.items(), key=lambda x: x[0]):
@@ -68,7 +71,9 @@ def build_task_rows(
             prompt = cond_map[task_id]["prompt"]
             rows.append(
                 {
+                    "benchmark": "mbpp",
                     "task_id": task_id,
+                    "task_key": str(task_id),
                     "condition": condition,
                     "prompt": prompt,
                     "oracle_code": oracle_row["code"],
@@ -98,8 +103,16 @@ def main() -> None:
     original = read_json(robustness_dir / "MBPP.json")
     incomplete = read_json(robustness_dir / "incomplete_MBPP.json")
     ambiguous = read_json(robustness_dir / "ambiguous_MBPP.json")
+    contradictory_path = robustness_dir / "contradictory_MBPP.json"
+    contradictory = read_json(contradictory_path) if contradictory_path.exists() else None
 
-    out_rows = build_task_rows(ticode_mbpp, original, incomplete, ambiguous)
+    out_rows = build_task_rows(
+        ticode_mbpp,
+        original,
+        incomplete,
+        ambiguous,
+        contradictory=contradictory,
+    )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
+import random
 import statistics
 import sys
 
@@ -73,6 +75,163 @@ def token_summary(rows: list[dict]) -> list[dict]:
     return out
 
 
+def _bootstrap_ci_binary(values: list[int], n_boot: int = 1000, alpha: float = 0.05) -> tuple[float, float]:
+    if not values:
+        return (0.0, 0.0)
+    rng = random.Random(42)
+    n = len(values)
+    means: list[float] = []
+    for _ in range(n_boot):
+        sample = [values[rng.randrange(n)] for _ in range(n)]
+        means.append(sum(sample) / n)
+    means.sort()
+    lo_idx = max(0, int(math.floor((alpha / 2.0) * len(means))) - 1)
+    hi_idx = min(len(means) - 1, int(math.ceil((1.0 - alpha / 2.0) * len(means))) - 1)
+    return means[lo_idx], means[hi_idx]
+
+
+def bootstrap_pass_at_1(rows: list[dict]) -> list[dict]:
+    grouped: dict[tuple[str, str], list[int]] = {}
+    overall_grouped: dict[str, list[int]] = {}
+    for row in rows:
+        val = 1 if row["pass_at_1"] else 0
+        grouped.setdefault((row["condition"], row["strategy"]), []).append(val)
+        overall_grouped.setdefault(row["strategy"], []).append(val)
+    out: list[dict] = []
+    for (condition, strategy), vals in sorted(grouped.items()):
+        lo, hi = _bootstrap_ci_binary(vals)
+        out.append(
+            {
+                "scope": "condition",
+                "condition": condition,
+                "strategy": strategy,
+                "n": len(vals),
+                "pass_at_1": sum(vals) / len(vals),
+                "ci95_low": lo,
+                "ci95_high": hi,
+            }
+        )
+    for strategy, vals in sorted(overall_grouped.items()):
+        lo, hi = _bootstrap_ci_binary(vals)
+        out.append(
+            {
+                "scope": "overall",
+                "condition": "all",
+                "strategy": strategy,
+                "n": len(vals),
+                "pass_at_1": sum(vals) / len(vals),
+                "ci95_low": lo,
+                "ci95_high": hi,
+            }
+        )
+    return out
+
+
+def cost_efficiency_summary(rows: list[dict]) -> list[dict]:
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        grouped.setdefault((row["condition"], row["strategy"]), []).append(row)
+    one_shot_by_condition: dict[str, float] = {}
+    for (condition, strategy), items in grouped.items():
+        if strategy != "one-shot":
+            continue
+        one_shot_by_condition[condition] = sum(1 if x["pass_at_1"] else 0 for x in items) / len(items)
+    out: list[dict] = []
+    for (condition, strategy), items in sorted(grouped.items()):
+        p = sum(1 if x["pass_at_1"] else 0 for x in items) / len(items)
+        avg_tokens = statistics.mean(
+            int(x.get("total_prompt_tokens", 0)) + int(x.get("total_completion_tokens", 0))
+            for x in items
+        )
+        baseline = one_shot_by_condition.get(condition, 0.0)
+        out.append(
+            {
+                "condition": condition,
+                "strategy": strategy,
+                "n": len(items),
+                "pass_at_1": p,
+                "avg_total_tokens": avg_tokens,
+                "pass_per_1k_tokens": (1000.0 * p / avg_tokens) if avg_tokens > 0 else 0.0,
+                "delta_pass_vs_oneshot": p - baseline,
+                "delta_pass_per_1k_tokens_vs_oneshot": (1000.0 * (p - baseline) / avg_tokens)
+                if avg_tokens > 0
+                else 0.0,
+            }
+        )
+    return out
+
+
+def fixed_budget_pass_summary(rows: list[dict], budgets: list[int] | None = None) -> list[dict]:
+    budgets = budgets or [500, 1000, 2000, 4000, 8000]
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        grouped.setdefault((row["condition"], row["strategy"]), []).append(row)
+    out: list[dict] = []
+    for (condition, strategy), items in sorted(grouped.items()):
+        with_tokens = [
+            (
+                int(x.get("total_prompt_tokens", 0)) + int(x.get("total_completion_tokens", 0)),
+                1 if x["pass_at_1"] else 0,
+            )
+            for x in items
+        ]
+        for budget in budgets:
+            eligible = [p for tok, p in with_tokens if tok <= budget]
+            out.append(
+                {
+                    "condition": condition,
+                    "strategy": strategy,
+                    "budget_tokens": budget,
+                    "eligible_n": len(eligible),
+                    "coverage": len(eligible) / max(1, len(with_tokens)),
+                    "pass_at_1_at_budget": (sum(eligible) / len(eligible)) if eligible else None,
+                }
+            )
+    return out
+
+
+def pareto_summary(rows: list[dict]) -> list[dict]:
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(row["strategy"], []).append(row)
+    points: list[dict] = []
+    for strategy, items in sorted(grouped.items()):
+        p = sum(1 if x["pass_at_1"] else 0 for x in items) / len(items)
+        avg_tokens = statistics.mean(
+            int(x.get("total_prompt_tokens", 0)) + int(x.get("total_completion_tokens", 0))
+            for x in items
+        )
+        avg_questions = statistics.mean(int(x.get("questions_asked", 0)) for x in items)
+        points.append(
+            {
+                "strategy": strategy,
+                "n": len(items),
+                "pass_at_1": p,
+                "avg_total_tokens": avg_tokens,
+                "avg_questions": avg_questions,
+                "pareto_efficient": True,
+            }
+        )
+    for i, a in enumerate(points):
+        for j, b in enumerate(points):
+            if i == j:
+                continue
+            dominates = (
+                b["avg_total_tokens"] <= a["avg_total_tokens"]
+                and b["avg_questions"] <= a["avg_questions"]
+                and b["pass_at_1"] >= a["pass_at_1"]
+                and (
+                    b["avg_total_tokens"] < a["avg_total_tokens"]
+                    or b["avg_questions"] < a["avg_questions"]
+                    or b["pass_at_1"] > a["pass_at_1"]
+                )
+            )
+            if dominates:
+                a["pareto_efficient"] = False
+                break
+    return points
+
+
 def eig_diagnostics(rows: list[dict]) -> list[dict]:
     grouped: dict[tuple[str, str], dict[str, float]] = {}
     counts_by_key: dict[tuple[str, str], int] = {}
@@ -100,6 +259,10 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 "process_crashes": 0.0,
                 "adapter_applied_count": 0.0,
                 "adapter_success_count": 0.0,
+                "invalid_tests_total": 0.0,
+                "valid_tests_total": 0.0,
+                "generated_tests_total": 0.0,
+                "generated_unique_total": 0.0,
             },
         )
         stats = grouped[key]
@@ -121,8 +284,16 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 continue
             stats["rounds"] += 1
             test_validation = step.get("test_validation", [])
+            generated_tests = step.get("generated_tests", [])
+            if isinstance(generated_tests, list):
+                stats["generated_tests_total"] += float(len(generated_tests))
+                stats["generated_unique_total"] += float(len({str(x).strip() for x in generated_tests}))
+            stats["valid_tests_total"] += float(len(step.get("valid_tests", [])))
             stats["generated_tests"] += len(step.get("generated_tests", []))
             for tv in test_validation:
+                if tv.get("valid"):
+                    continue
+                stats["invalid_tests_total"] += 1
                 if tv.get("invalid_reason") == "non_discriminative":
                     stats["filtered_non_discriminative"] += 1
                 if tv.get("invalid_reason") == "universal_runtime_error":
@@ -175,6 +346,10 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 "type_error_rate": s["type_errors"] / run_count,
                 "noresult_rate": s["noresults"] / run_count,
                 "process_crash_rate": s["process_crashes"] / run_count,
+                "test_executable_rate": s["valid_tests_total"] / max(1.0, s["generated_tests_total"]),
+                "test_redundancy_rate": 1.0
+                - (s["generated_unique_total"] / max(1.0, s["generated_tests_total"])),
+                "invalid_test_rate": s["invalid_tests_total"] / max(1.0, s["generated_tests_total"]),
             }
         )
     return out
@@ -295,6 +470,10 @@ def main() -> None:
     write_csv(out_dir / "summary_tokens.csv", tok)
     write_csv(out_dir / "summary_overall_strategy.csv", overall)
     write_csv(out_dir / "summary_eig_diagnostics.csv", eig_diagnostics(rows))
+    write_csv(out_dir / "summary_bootstrap_ci.csv", bootstrap_pass_at_1(rows))
+    write_csv(out_dir / "summary_cost_efficiency.csv", cost_efficiency_summary(rows))
+    write_csv(out_dir / "summary_fixed_budget.csv", fixed_budget_pass_summary(rows))
+    write_csv(out_dir / "summary_pareto.csv", pareto_summary(rows))
     write_markdown_table(out_dir / "comparison_table.md", overall, p1, mbppplus_by_condition)
 
     print("Wrote:")
@@ -305,6 +484,10 @@ def main() -> None:
     print(f"- {out_dir / 'summary_tokens.csv'}")
     print(f"- {out_dir / 'summary_overall_strategy.csv'}")
     print(f"- {out_dir / 'summary_eig_diagnostics.csv'}")
+    print(f"- {out_dir / 'summary_bootstrap_ci.csv'}")
+    print(f"- {out_dir / 'summary_cost_efficiency.csv'}")
+    print(f"- {out_dir / 'summary_fixed_budget.csv'}")
+    print(f"- {out_dir / 'summary_pareto.csv'}")
     print(f"- {out_dir / 'comparison_table.md'}")
 
 

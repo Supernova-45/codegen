@@ -16,6 +16,7 @@ ALLOWED_IMPORTS = {
     "string",
     "bisect",
     "numpy",
+    "typing",
 }
 
 

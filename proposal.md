@@ -10,7 +10,7 @@ We make three contributions:
 
 1. **EIG-based test selection** adapted from Grand et al.'s BED framework, replacing TiCoder's heuristic discriminative ranking with information-theoretically optimal query selection over a Bayesian posterior of candidate programs.
 2. **An adaptive ask-or-submit decision**, adapted from the exploration/exploitation tradeoff in Grand et al., where the model decides at each step whether another test query is worth its cost or whether to submit code immediately.
-3. **Evaluation on systematically underspecified prompts**, using the controlled mutation methodology of [Larbi et al.](https://arxiv.org/abs/2507.20439) to create incomplete and ambiguous task descriptions where clarification provides maximal value.
+3. **Evaluation on systematically underspecified prompts**, using the controlled mutation methodology of [Larbi et al.](https://arxiv.org/abs/2507.20439) to create incomplete, ambiguous, and contradictory task descriptions where clarification provides maximal value.
 
 Can we get smaller, cheaper models to match larger ones by having them ask a few well-chosen questions? If structured test queries can recover accuracy lost to prompt underspecification, we gain insight into how to guide LLMs to behave less like autocomplete and more like human engineers.
 
@@ -47,7 +47,7 @@ We evaluate on two standard Python code-generation benchmarks, plus systematical
 - **Incomplete:** Strip edge-case specifications, remove illustrative examples, omit parameter types or return-value constraints. (e.g., "Write a function to find a missing value in a list" instead of "Write a function to find the missing number in a sorted array.")
 - **Ambiguous:** Introduce vague wording with multiple plausible interpretations. (e.g., "Write a function to select the smallest of a data group" instead of "Write a function to get the n smallest items from a dataset.")
 
-Following Larbi et al.'s methodology, we use GPT-4 as the mutation engine with structured mutation guidelines, followed by manual expert validation to ensure naturalness and that the intended quality issue is present. The original, well-specified descriptions serve as the reference oracle defining "intended behavior." This creates a three-level spectrum -- *original*, *incomplete*, *ambiguous* -- over which we can measure how much test queries help as a function of prompt clarity.
+Following Larbi et al.'s methodology, we use GPT-4 as the mutation engine with structured mutation guidelines, followed by manual expert validation to ensure naturalness and that the intended quality issue is present. The original, well-specified descriptions serve as the reference oracle defining "intended behavior." This creates a four-level spectrum -- *original*, *incomplete*, *ambiguous*, *contradictory* -- over which we can measure how much test queries help as a function of prompt clarity.
 
 ## Methods
 
@@ -80,19 +80,19 @@ For up to K_max rounds:
 
 > p_t = sum over j of w_j * 1{f_t(c_j) = 1}
 
-where f_t(c_j) in {0, 1} indicates whether test t passes on candidate c_j. Then compute:
+where `f_t(c_j) in {0, 1}` indicates whether test t passes on candidate c_j. Equivalently, define `G_t+ = {j : f_t(c_j)=1}` and `G_t- = {j : f_t(c_j)=0}`. Then compute:
 
 > EIG_epsilon(t) = H_b(epsilon + (1 - 2 * epsilon) * p_t) - H_b(epsilon)
 
-where H_b(p) = -p log2(p) - (1-p) log2(1-p) is binary entropy and epsilon is the noise parameter of the oracle channel. EIG is maximized when p_t is near 0.5, i.e., when the candidate programs are maximally split on the test outcome. Select the test t* = argmax_t EIG_epsilon(t).
+where `H_b(p) = -p log2(p) - (1-p) log2(1-p)` is binary entropy and `epsilon` is the oracle noise rate (binary-symmetric-channel flip probability). EIG is maximized when `p_t` is near 0.5, i.e., when `G_t+` and `G_t-` are balanced by posterior mass. Select `t* = argmax_t EIG_epsilon(t)`.
 
-**(d) Ask-or-submit decision.** Before asking t*, check whether asking is worth the cost. Let p_best = max_j w_j be the current MAP confidence. Compute the expected post-question MAP confidence p_best_next(t*) by marginalizing over both possible answers (pass/fail). If p_best > gamma * p_best_next(t*), skip the remaining questions and proceed to submission. The discount factor gamma in [0, 1] trades off the cost of asking against the value of information.
+**(d) Ask-or-submit decision.** Before asking `t*`, check whether asking is worth the cost. Let `p_best = max_j w_j` be the current MAP confidence. Compute the expected post-question MAP confidence `p_best_next(t*)` by marginalizing over both possible answers (pass/fail). If `p_best > gamma * p_best_next(t*)`, skip the remaining questions and proceed to submission. The ask-discount `gamma in [0, 1]` controls how hard we penalize an extra question: lower `gamma` encourages asking, higher `gamma` encourages submitting.
 
 **(e) Ask and update.** Submit t* to the reference oracle and observe the answer a_tilde in {0, 1}. Update the posterior via Bayesian reweighting:
 
 > w_j_new is proportional to w_j * [(1 - epsilon) * 1{a_tilde = f_t*(c_j)} + epsilon * 1{a_tilde != f_t*(c_j)}]
 
-This soft update downweights rather than eliminates inconsistent candidates, making the system robust to noisy or flaky test outcomes -- a key advantage over TiCoder's hard pruning.
+This soft update downweights rather than eliminates inconsistent candidates, making the system robust to noisy or flaky test outcomes. We also run a hard-pruning ablation that sets posterior mass to zero for candidates inconsistent with an observed answer.
 
 ### Step 3: Generate the final program
 
@@ -113,6 +113,10 @@ To isolate the value of (i) clarification itself, (ii) the test format, and (iii
 
 **Natural-language clarifying questions:** Instead of unit tests, the model asks free-form natural-language clarifying questions (e.g., "Should the function be case-sensitive?"), answered by an LLM judge with access to the reference solution. This isolates the value of the executable test format specifically versus natural-language clarification.
 
+**Self-consistency without oracle interaction:** Sample `N` candidate programs and select the one that passes the most automatically generated executable tests, without asking oracle clarification questions. This isolates "more sampling and test voting" from interactive clarification.
+
+**Repair baseline:** Generate a candidate solution, run automatically generated tests, and iteratively repair the code for a fixed number of rounds without oracle answers. This isolates gains from iterative self-revision alone.
+
 Each baseline is crossed with both final-generation strategies (best-candidate selection and constraint-conditioned re-prompting), yielding the following condition table:
 
 | | Best candidate | Re-prompt |
@@ -121,6 +125,8 @@ Each baseline is crossed with both final-generation strategies (best-candidate s
 | Random tests | yes | yes |
 | Fixed edge-case templates | yes | yes |
 | Natural-language questions | -- | yes |
+| Self-consistency (non-interactive) | yes | -- |
+| Repair (non-interactive iterative) | yes | -- |
 | EIG-selected tests (ours) | yes | yes |
 
 ## Evaluation
@@ -131,7 +137,15 @@ Each baseline is crossed with both final-generation strategies (best-candidate s
 
 **Query efficiency.** We report accuracy gain per question and per token (total tokens consumed by test generation and LLM queries), enabling cost-normalized comparisons. This answers: is it cheaper to ask 3 well-chosen test queries or to use a model 10x larger?
 
-**Breakdown by description quality.** We report pass@1 separately for the three description conditions -- original, incomplete, ambiguous -- to test our central hypothesis that test queries help more on underspecified prompts.
+**Breakdown by description quality.** We report pass@1 separately for the four description conditions -- original, incomplete, ambiguous, contradictory -- to test our central hypothesis that test queries help more on underspecified prompts.
+
+**Uncertainty reporting.** We report bootstrap confidence intervals (95%) for pass@1 overall and by condition, and include these in all headline comparisons.
+
+**Compute-matched comparisons.** We report pass@1 at fixed token budgets and efficiency-normalized metrics (accuracy gain per 1k tokens) to make interaction cost central rather than auxiliary.
+
+**Pareto reporting.** We report pass@1-vs-tokens and pass@1-vs-questions Pareto frontiers to compare strategies under practical budget constraints.
+
+**Test quality bottlenecks.** We report executable-test rate, redundancy rate, invalid-test breakdowns, and non-discriminative-test rates, plus qualitative examples of high-value and low-value generated tests.
 
 **Ambiguity-type analysis.** We categorize the underspecified prompts by the type of information removed (edge-case behavior, parameter types, ordering constraints, boundary conditions) and measure which categories are most "query-resolvable" via unit tests versus not. This identifies the boundary of what binary test queries can and cannot clarify.
 
@@ -142,6 +156,8 @@ Each baseline is crossed with both final-generation strategies (best-candidate s
 **Test-driven interactive code generation.** [TiCoder (Fakhoury et al., 2024)](https://arxiv.org/abs/2404.10100) pioneered the workflow of generating candidate tests, presenting them to a user for validation, and pruning inconsistent code suggestions. TiCoder ranks tests by a discriminative heuristic s_discr(t) = min(|G_t+|, |G_t-|) / max(|G_t+|, |G_t-|), which prefers tests that split candidates evenly but is not information-theoretically grounded. Our work replaces this with EIG-based selection from Bayesian Experimental Design and adds a soft posterior update (vs. hard pruning) and an adaptive stopping rule. [ClarifyCoder (2025)](https://arxiv.org/abs/2504.16331) fine-tunes models to ask natural-language clarifying questions, but does not use executable tests or information-theoretic selection.
 
 **Bayesian Experimental Design for agents.** [Grand et al. (2024)](https://arxiv.org/abs/2510.20886) develop BED strategies for Collaborative Battleship, showing that EIG-based question selection with Monte Carlo posterior inference enables weak LMs to achieve superhuman performance at ~1% of frontier model cost. We adapt their framework -- weighted particle posteriors, EIG scoring, noisy-channel observation model, and the ask-or-act decision -- from spatial reasoning over hidden board states to reasoning over the space of plausible program behaviors.
+
+**Consistency checks and internal verification.** [Gekhman et al. (2024)](https://aclanthology.org/2024.findings-eacl.62.pdf) show that direct and indirect consistency checks can improve reliability calibration without external retrieval. We use this as motivation for reporting internal consistency signals in our pipeline: test discriminativeness, agreement patterns across candidate programs, and stability of clarification outcomes.
 
 **Robustness to underspecified prompts.** [Larbi et al. (2025)](https://arxiv.org/abs/2507.20439) systematically mutate HumanEval and MBPP descriptions to introduce ambiguity, incompleteness, and contradiction, showing 20-40% pass@1 drops. We adopt their mutation methodology to construct evaluation conditions where clarification is maximally valuable, and test whether our interactive pipeline can recover the lost accuracy.
 

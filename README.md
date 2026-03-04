@@ -11,10 +11,10 @@ This project implements the loop described in `proposal.md`:
 ## Scope
 
 Currently supports:
-- MBPP dataset
+- MBPP and HumanEval variant datasets
 - Optional MBPP+ strict re-scoring (`evalplus/mbppplus`)
-- prompt conditions: `original`, `incomplete`, `ambiguous`
-- strategies: `one-shot`, `random-tests`, `eig-tests`
+- prompt conditions: `original`, `incomplete`, `ambiguous`, `contradictory` (if available in source variants)
+- strategies: `one-shot`, `random-tests`, `eig-tests`, `self-consistency`, `repair`, `ticode-tests`
 
 ## Environment Setup
 
@@ -60,6 +60,12 @@ Required environment variables:
 
 Optional:
 - `CLARIFYCODE_BASE_URL` (defaults to OpenAI public endpoint)
+- `CLARIFYCODE_API_KEY_ENV_POOL` (comma-separated env var names, e.g. `GROK_KEY_1,...,GROK_KEY_6`)
+- `CLARIFYCODE_API_KEY_POOL` (comma-separated raw keys)
+
+If `--api-key-env-pool` is not provided, `scripts/run_experiment.py` auto-loads keys from `.env` in this order:
+1. `CLARIFYCODE_API_KEY_ENV_POOL`
+2. `CLARIFYCODE_API_KEY_POOL`
 
 ## Prepare MBPP Variants (Example)
 
@@ -70,9 +76,22 @@ python scripts/prepare_mbpp_variants.py \
 
 Default source paths are now vendored in this repo:
 - `data/sources/ticode_mbpp/mbpp.jsonl`
-- `data/sources/robustness_mbpp/{MBPP.json,incomplete_MBPP.json,ambiguous_MBPP.json}`
+- `data/sources/robustness_mbpp/{MBPP.json,incomplete_MBPP.json,ambiguous_MBPP.json,contradictory_MBPP.json}`
 
 You can still override with `--ticode-mbpp` and `--robustness-dir` if needed.
+
+## Prepare HumanEval Variants
+
+```bash
+python scripts/prepare_humaneval_variants.py \
+  --output data/humaneval_variants.jsonl
+```
+
+Source files are expected under:
+- `data/sources/robustness_humaneval/HumanEval.json`
+- `data/sources/robustness_humaneval/incomplete_humaneval.json`
+- `data/sources/robustness_humaneval/ambiguous_humaneval.json`
+- `data/sources/robustness_humaneval/contradictory_humaneval.json` (optional)
 
 `scripts/run_experiment.py` automatically loads `.env`.
 
@@ -85,6 +104,21 @@ python scripts/run_experiment.py --config configs/mvp_mbpp.yaml
 This keeps optimization on current hidden tests and, when enabled in config, re-scores the
 same `final_code` on MBPP+ for stricter reporting.
 
+HumanEval run:
+
+```bash
+python scripts/run_experiment.py --config configs/mvp_humaneval.yaml
+```
+
+Sharded run using key pool from `.env` (no CLI key flags needed):
+
+```bash
+python scripts/run_experiment.py \
+  --config configs/mvp_mbpp_rigorous.yaml \
+  --num-shards 6 \
+  --shard-index 0
+```
+
 EIG tuning knobs in `pipeline`:
 - `gamma`: ask-vs-submit threshold (lower asks more often)
 - `min_questions_if_valid`: force at least this many asks when valid tests exist
@@ -95,6 +129,10 @@ EIG tuning knobs in `pipeline`:
 - `eig_questions_per_round`: number of top-ranked EIG questions asked each round (no diversity constraint)
 - `candidate_temperature`: sampling temperature for candidate program generation
 - `reprompt_temperature`: sampling temperature for post-clarification regeneration
+- `query_scorer`: `eig` or `ticode` (ablation for selection rule)
+- `hard_prune_update`: hard candidate elimination instead of soft posterior reweighting
+- `repair_rounds`: number of generate->test->repair rounds in repair baseline
+- `self_consistency_min_coverage`: minimum defined-outcome coverage for self-consistency test scoring
 
 ## Summarize Results
 
@@ -107,44 +145,36 @@ python scripts/summarize_results.py \
 Additional MBPP+ summary output:
 - `results/summary_mbppplus_pass_at_1.csv`
 - `results/summary_eig_diagnostics.csv`
+- `results/summary_bootstrap_ci.csv`
+- `results/summary_cost_efficiency.csv`
+- `results/summary_fixed_budget.csv`
+- `results/summary_pareto.csv`
 
-## Preliminary Results
+## Ablation Sweeps
 
-Using the following config:
-- `gamma=0.95`
-- `min_questions_if_valid=2`
-- `filter_non_discriminative=true`
-- `min_valid_candidate_coverage=0.5`
-- `disable_voi_stop=false`
-- `force_full_question_budget=false`
-- `k_max=4`
-- `run_reprompt=true`
-- `shared_test_pool=true`
-- `shared_test_pool_size=24`
-- `shared_test_pool_regen_rounds=1`
-- `skip_posterior_update_on_undefined_oracle=true` 
+Generate the sweep command matrix (scorer, update mode, VOI stop, and N/tests/k sensitivity):
 
-Here are the results:
+```bash
+python scripts/run_ablation_sweeps.py --config configs/mvp_mbpp_rigorous.yaml
+```
 
-| strategy | n | pass@1 | MBPP+ pass@1 | MBPP+ n | avg_questions | avg_total_tokens |
-|---|---:|---:|---:|---:|---:|---:|
-| eig-tests | 30 | 0.733 | n/a | 0 | 2.367 | 7961.0 |
-| one-shot | 30 | 0.567 | n/a | 0 | 0.000 | 209.8 |
-| random-tests | 30 | 0.700 | n/a | 0 | 3.333 | 8101.0 |
+Execute the sweep:
 
-## By Condition
+```bash
+python scripts/run_ablation_sweeps.py \
+  --config configs/mvp_mbpp_rigorous.yaml \
+  --execute
+```
 
-| condition | strategy | n | pass@1 |
-|---|---|---:|---:|
-| ambiguous | eig-tests | 10 | 0.700 |
-| ambiguous | one-shot | 10 | 0.500 |
-| ambiguous | random-tests | 10 | 0.700 |
-| incomplete | eig-tests | 10 | 0.700 |
-| incomplete | one-shot | 10 | 0.500 |
-| incomplete | random-tests | 10 | 0.700 |
-| original | eig-tests | 10 | 0.800 |
-| original | one-shot | 10 | 0.700 |
-| original | random-tests | 10 | 0.700 |
+## Reporting Checklist
+
+When preparing final tables/figures, include:
+- `pass@1` overall and by condition (`original`, `incomplete`, `ambiguous`, `contradictory`)
+- bootstrap uncertainty from `summary_bootstrap_ci.csv`
+- cost-normalized metrics from `summary_cost_efficiency.csv`
+- fixed-budget comparisons from `summary_fixed_budget.csv`
+- Pareto frontier points from `summary_pareto.csv`
+- test quality diagnostics from `summary_eig_diagnostics.csv`
 
 ## References
 

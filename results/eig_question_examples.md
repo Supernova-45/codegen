@@ -2,6 +2,13 @@
 
 Source run: `results/ablation_stage0.jsonl` (completed stage0 ablation).
 
+## Quick Qualitative Takeaways
+
+- Good generated tests tend to isolate one ambiguity at a time and produce balanced splits across candidates (`G+` vs `G-` near 50/50 posterior mass).
+- Weak generated tests are either non-discriminative (all candidates pass/fail), invalid (runtime/type/signature issues), or redundant near-duplicates.
+- EIG is most helpful when candidate programs disagree on edge-case semantics; it is less helpful when all candidates share the same wrong interface assumption.
+- Repeated `NoResult` and signature/type errors indicate a test-quality bottleneck rather than only a ranking bottleneck.
+
 ## EIG Correct After Clarification (reference)
 
 ### Win 1: Task 3 (original)

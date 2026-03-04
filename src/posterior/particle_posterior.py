@@ -38,9 +38,13 @@ class ParticlePosterior:
         observed: bool,
         epsilon: float,
         undefined_likelihood: float = 1.0,
+        hard_prune: bool = False,
     ) -> None:
         new_weights: list[float] = []
         for w, outcome in zip(self.weights, outcomes, strict=True):
+            if hard_prune and outcome is not None and outcome != observed:
+                new_weights.append(0.0)
+                continue
             p = self._likelihood_for_observation(
                 outcome,
                 observed=observed,
@@ -56,6 +60,7 @@ class ParticlePosterior:
         outcomes: list[TestOutcome],
         epsilon: float,
         undefined_likelihood: float = 1.0,
+        hard_prune: bool = False,
     ) -> float:
         p_obs_true = 0.0
         for w, outcome in zip(self.weights, outcomes, strict=True):
@@ -72,12 +77,14 @@ class ParticlePosterior:
             observed=True,
             epsilon=epsilon,
             undefined_likelihood=undefined_likelihood,
+            hard_prune=hard_prune,
         )
         post_false = self._posterior_given_observation(
             outcomes,
             observed=False,
             epsilon=epsilon,
             undefined_likelihood=undefined_likelihood,
+            hard_prune=hard_prune,
         )
 
         return p_obs_true * max(post_true) + p_obs_false * max(post_false)
@@ -88,9 +95,13 @@ class ParticlePosterior:
         observed: bool,
         epsilon: float,
         undefined_likelihood: float,
+        hard_prune: bool,
     ) -> list[float]:
         ws: list[float] = []
         for w, outcome in zip(self.weights, outcomes, strict=True):
+            if hard_prune and outcome is not None and outcome != observed:
+                ws.append(0.0)
+                continue
             likelihood = self._likelihood_for_observation(
                 outcome,
                 observed=observed,

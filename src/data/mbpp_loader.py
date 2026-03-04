@@ -1,32 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import ast
 import json
 import random
 import re
 from typing import Iterable
 
+from data.task_schema import BenchmarkTask
 
-@dataclass
-class MBPPTask:
-    task_id: int
-    condition: str
-    prompt: str
-    oracle_code: str
-    visible_tests: list[str]
-    hidden_tests: list[str]
-    function_name: str
-
-
-def load_variant_file(path: str) -> list[MBPPTask]:
-    tasks: list[MBPPTask] = []
+def load_variant_file(path: str) -> list[BenchmarkTask]:
+    tasks: list[BenchmarkTask] = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             row = json.loads(line)
             tasks.append(
-                MBPPTask(
+                BenchmarkTask(
+                    benchmark=str(row.get("benchmark", "mbpp")),
                     task_id=int(row["task_id"]),
+                    task_key=str(row.get("task_key", row["task_id"])),
                     condition=row["condition"],
                     prompt=row["prompt"],
                     oracle_code=row["oracle_code"],
@@ -39,12 +30,12 @@ def load_variant_file(path: str) -> list[MBPPTask]:
 
 
 def filter_tasks(
-    tasks: Iterable[MBPPTask],
+    tasks: Iterable[BenchmarkTask],
     conditions: list[str],
     max_examples: int,
     seed: int,
     shuffle: bool,
-) -> list[MBPPTask]:
+) -> list[BenchmarkTask]:
     filtered = [t for t in tasks if t.condition in conditions]
     if shuffle:
         rng = random.Random(seed)

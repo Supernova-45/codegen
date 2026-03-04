@@ -6,7 +6,8 @@ import random
 from typing import Any
 
 from config import PipelineConfig
-from data.mbpp_loader import MBPPTask, infer_signature_hint
+from data.mbpp_loader import infer_signature_hint
+from data.task_schema import BenchmarkTask
 from execution.adapter import build_effective_code
 from execution.sandbox import run_assertion, run_tests
 from models.openai_compatible import OpenAICompatibleClient, Usage
@@ -59,7 +60,7 @@ class ProblemResult:
 
 
 def run_problem(
-    task: MBPPTask,
+    task: BenchmarkTask,
     strategy: str,
     model: OpenAICompatibleClient,
     cfg: PipelineConfig,
@@ -72,8 +73,17 @@ def run_problem(
     signature_hint, expected_arity = infer_signature_hint(task.visible_tests, task.function_name)
     test_arity = expected_arity if cfg.enforce_test_signature_arity else None
 
-    if strategy not in {"one-shot", "random-tests", "eig-tests", "ticode-tests"}:
+    if strategy not in {
+        "one-shot",
+        "random-tests",
+        "eig-tests",
+        "ticode-tests",
+        "self-consistency",
+        "repair",
+    }:
         raise ValueError(f"Unsupported strategy: {strategy}")
+    if cfg.query_scorer not in {"eig", "ticode"}:
+        raise ValueError(f"Unsupported query scorer: {cfg.query_scorer}")
 
     if strategy == "one-shot":
         code_list, u = model.generate_code_candidates(
@@ -122,6 +132,17 @@ def run_problem(
             mbppplus_error=None,
             interaction_trace=interaction_trace,
             model_trace=model.get_trace(),
+        )
+    if strategy == "repair":
+        return _run_repair_baseline(
+            task=task,
+            cfg=cfg,
+            model=model,
+            usage=usage,
+            interaction_trace=interaction_trace,
+            signature_hint=signature_hint,
+            expected_arity=expected_arity,
+            test_arity=test_arity,
         )
 
     candidates, u_codes = model.generate_code_candidates(
@@ -207,6 +228,20 @@ def run_problem(
 
     if strategy == "ticode-tests":
         return _run_ticode_tests(
+            task=task,
+            cfg=cfg,
+            model=model,
+            usage=usage,
+            interaction_trace=interaction_trace,
+            signature_hint=signature_hint,
+            expected_arity=expected_arity,
+            test_arity=test_arity,
+            candidates=candidates,
+            effective_candidates=effective_candidates,
+            candidate_adapters=candidate_adapters,
+        )
+    if strategy == "self-consistency":
+        return _run_self_consistency_baseline(
             task=task,
             cfg=cfg,
             model=model,
@@ -309,14 +344,10 @@ def run_problem(
                         break
                     regen_count += 1
                     continue
-                _, regen_scores, regen_details = select_max_eig(
-                    valid_tests,
-                    outcomes_by_test,
-                    posterior,
-                    cfg.epsilon,
-                    undefined_likelihood=cfg.undefined_outcome_likelihood,
-                    discriminative_weight=cfg.eig_discriminative_weight,
-                    runtime_error_penalty=cfg.eig_runtime_error_penalty,
+                regen_scores, regen_details = _score_tests_for_strategy(
+                    outcomes_by_test=outcomes_by_test,
+                    posterior=posterior,
+                    cfg=cfg,
                 )
                 best_score = max(regen_scores) if regen_scores else 0.0
                 high_value_count = sum(1 for s in regen_scores if s >= eig_score_floor)
@@ -343,6 +374,8 @@ def run_problem(
             "regen_attempts_used": regen_count,
             "candidate_adapter_info": candidate_adapters,
             "shared_test_pool_enabled": cfg.shared_test_pool,
+            "query_scorer": cfg.query_scorer,
+            "hard_prune_update": cfg.hard_prune_update,
         }
         if cfg.shared_test_pool:
             round_log["shared_pool_remaining"] = len(shared_pool_tests)
@@ -358,14 +391,10 @@ def run_problem(
             score_details: list[dict[str, Any]] = []
             selected_indices = [rng.randrange(len(valid_tests))]
         else:
-            _, scores, score_details = select_max_eig(
-                valid_tests,
-                outcomes_by_test,
-                posterior,
-                cfg.epsilon,
-                undefined_likelihood=cfg.undefined_outcome_likelihood,
-                discriminative_weight=cfg.eig_discriminative_weight,
-                runtime_error_penalty=cfg.eig_runtime_error_penalty,
+            scores, score_details = _score_tests_for_strategy(
+                outcomes_by_test=outcomes_by_test,
+                posterior=posterior,
+                cfg=cfg,
             )
             candidate_indices = list(range(len(valid_tests)))
             if eig_score_floor is not None:
@@ -395,6 +424,7 @@ def run_problem(
                 outcomes,
                 cfg.epsilon,
                 undefined_likelihood=cfg.undefined_outcome_likelihood,
+                hard_prune=cfg.hard_prune_update,
             )
             if len(chosen_tests) >= cfg.k_max:
                 stop_after_round = True
@@ -440,6 +470,7 @@ def run_problem(
                     bool(observed),
                     cfg.epsilon,
                     undefined_likelihood=cfg.undefined_outcome_likelihood,
+                    hard_prune=cfg.hard_prune_update,
                 )
             if observed is not None:
                 asked_constraints.append((selected_test, observed))
@@ -658,8 +689,30 @@ def _is_runtime_error(ok: bool, error: str) -> bool:
     return "AssertionError" not in error
 
 
+def _score_tests_for_strategy(
+    outcomes_by_test: list[list[TestOutcome]],
+    posterior: ParticlePosterior,
+    cfg: PipelineConfig,
+) -> tuple[list[float], list[dict[str, Any]]]:
+    if cfg.query_scorer == "ticode":
+        all_indices = list(range(len(posterior.weights)))
+        scores = ticode_scores(outcomes_by_test, all_indices)
+        details = [{"ticode_discriminative_score": s} for s in scores]
+        return scores, details
+    _, scores, details = select_max_eig(
+        [],
+        outcomes_by_test,
+        posterior,
+        cfg.epsilon,
+        undefined_likelihood=cfg.undefined_outcome_likelihood,
+        discriminative_weight=cfg.eig_discriminative_weight,
+        runtime_error_penalty=cfg.eig_runtime_error_penalty,
+    )
+    return scores, details
+
+
 def _build_shared_test_pool(
-    task: MBPPTask,
+    task: BenchmarkTask,
     model: OpenAICompatibleClient,
     cfg: PipelineConfig,
     usage: Usage,
@@ -885,7 +938,7 @@ def _ticode_rank_alive_by_passing_tests(
     return [keep_indices[i] for i in order]
 
 def _run_ticode_tests(
-    task: MBPPTask,
+    task: BenchmarkTask,
     cfg: PipelineConfig,
     model: OpenAICompatibleClient,
     usage: Usage,
@@ -1058,4 +1111,198 @@ def _run_ticode_tests(
         mbppplus_error=None,
         interaction_trace=interaction_trace,
         model_trace=model.get_trace(),
+    )
+
+
+def _run_self_consistency_baseline(
+    task: BenchmarkTask,
+    cfg: PipelineConfig,
+    model: OpenAICompatibleClient,
+    usage: Usage,
+    interaction_trace: list[dict[str, Any]],
+    signature_hint: str | None,
+    expected_arity: int | None,
+    test_arity: int | None,
+    candidates: list[str],
+    effective_candidates: list[str],
+    candidate_adapters: list[dict[str, Any]],
+) -> ProblemResult:
+    test_candidates, u_tests, test_filter_stats = model.generate_candidate_tests(
+        task.prompt,
+        function_name=task.function_name,
+        signature_hint=signature_hint,
+        expected_arity=test_arity,
+        asked_tests=[],
+        visible_tests=task.visible_tests,
+        n_tests=cfg.tests_per_round,
+    )
+    usage.prompt_tokens += u_tests.prompt_tokens
+    usage.completion_tokens += u_tests.completion_tokens
+    valid_tests, outcomes_by_test, test_eval_logs = _evaluate_test_matrix(
+        test_candidates,
+        effective_candidates,
+        cfg.sandbox_timeout_s,
+        min_coverage=cfg.self_consistency_min_coverage,
+        filter_non_discriminative=False,
+        determinism_repeats=cfg.assertion_determinism_repeats,
+    )
+    scores = [0.0 for _ in candidates]
+    for outcomes in outcomes_by_test:
+        for idx, outcome in enumerate(outcomes):
+            if outcome is True:
+                scores[idx] += 1.0
+            elif outcome is None:
+                scores[idx] -= 0.25
+    best_idx = max(range(len(candidates)), key=lambda i: scores[i]) if candidates else 0
+    final_code = candidates[best_idx] if candidates else ""
+    effective_final, final_adapter_info = build_effective_code(
+        final_code,
+        expected_function_name=task.function_name,
+        expected_arity=expected_arity,
+        enabled=cfg.eval_with_adapter,
+    )
+    passed, total, errors = run_tests(effective_final, task.hidden_tests, cfg.sandbox_timeout_s)
+    interaction_trace.append(
+        {
+            "step": "self_consistency_selection",
+            "generated_tests": test_candidates,
+            "valid_tests": valid_tests,
+            "test_validation": test_eval_logs,
+            "test_generation_filter_stats": test_filter_stats,
+            "candidate_scores": scores,
+            "selected_candidate_index": best_idx,
+            "candidate_adapter_info": candidate_adapters,
+        }
+    )
+    return ProblemResult(
+        task_id=task.task_id,
+        condition=task.condition,
+        strategy="self-consistency",
+        pass_at_1=passed == total,
+        questions_asked=0,
+        chosen_tests=[],
+        total_prompt_tokens=usage.prompt_tokens,
+        total_completion_tokens=usage.completion_tokens,
+        final_code=final_code,
+        eval_passed=passed,
+        eval_total=total,
+        eval_errors=errors,
+        adapter_info=final_adapter_info.to_dict(),
+        mbppplus_pass_at_1=None,
+        mbppplus_error=None,
+        interaction_trace=interaction_trace,
+        model_trace=model.get_trace(),
+    )
+
+
+def _run_repair_baseline(
+    task: BenchmarkTask,
+    cfg: PipelineConfig,
+    model: OpenAICompatibleClient,
+    usage: Usage,
+    interaction_trace: list[dict[str, Any]],
+    signature_hint: str | None,
+    expected_arity: int | None,
+    test_arity: int | None,
+) -> ProblemResult:
+    current_prompt = task.prompt
+    asked_tests: list[str] = []
+    current_code = ""
+    for round_idx in range(cfg.repair_rounds):
+        code_list, u_code = model.generate_code_candidates(
+            current_prompt,
+            n=1,
+            function_name=task.function_name,
+            signature_hint=signature_hint,
+            visible_tests=task.visible_tests,
+            temperature=0.2 if round_idx == 0 else cfg.reprompt_temperature,
+        )
+        usage.prompt_tokens += u_code.prompt_tokens
+        usage.completion_tokens += u_code.completion_tokens
+        current_code = code_list[0]
+        effective_code, _ = build_effective_code(
+            current_code,
+            expected_function_name=task.function_name,
+            expected_arity=expected_arity,
+            enabled=cfg.eval_with_adapter,
+        )
+
+        test_candidates, u_tests, test_filter_stats = model.generate_candidate_tests(
+            task.prompt,
+            function_name=task.function_name,
+            signature_hint=signature_hint,
+            expected_arity=test_arity,
+            asked_tests=asked_tests,
+            visible_tests=task.visible_tests,
+            n_tests=cfg.tests_per_round,
+        )
+        usage.prompt_tokens += u_tests.prompt_tokens
+        usage.completion_tokens += u_tests.completion_tokens
+        asked_tests.extend(test_candidates)
+        valid_tests, _, test_eval_logs = _evaluate_test_matrix(
+            test_candidates,
+            [effective_code],
+            cfg.sandbox_timeout_s,
+            min_coverage=1.0,
+            filter_non_discriminative=False,
+            determinism_repeats=cfg.assertion_determinism_repeats,
+        )
+        failing_assertions: list[str] = []
+        for assertion in valid_tests:
+            ok, err = run_assertion(effective_code, assertion, cfg.sandbox_timeout_s)
+            if not ok:
+                failing_assertions.append(f"{assertion}  # {err}")
+        interaction_trace.append(
+            {
+                "step": "repair_round",
+                "round": round_idx + 1,
+                "generated_tests": test_candidates,
+                "valid_tests": valid_tests,
+                "test_validation": test_eval_logs,
+                "test_generation_filter_stats": test_filter_stats,
+                "failing_assertions": failing_assertions,
+            }
+        )
+        if not failing_assertions:
+            break
+        current_prompt = _format_repair_prompt(task.prompt, current_code, failing_assertions)
+
+    effective_final, final_adapter_info = build_effective_code(
+        current_code,
+        expected_function_name=task.function_name,
+        expected_arity=expected_arity,
+        enabled=cfg.eval_with_adapter,
+    )
+    passed, total, errors = run_tests(effective_final, task.hidden_tests, cfg.sandbox_timeout_s)
+    return ProblemResult(
+        task_id=task.task_id,
+        condition=task.condition,
+        strategy="repair",
+        pass_at_1=passed == total,
+        questions_asked=0,
+        chosen_tests=[],
+        total_prompt_tokens=usage.prompt_tokens,
+        total_completion_tokens=usage.completion_tokens,
+        final_code=current_code,
+        eval_passed=passed,
+        eval_total=total,
+        eval_errors=errors,
+        adapter_info=final_adapter_info.to_dict(),
+        mbppplus_pass_at_1=None,
+        mbppplus_error=None,
+        interaction_trace=interaction_trace,
+        model_trace=model.get_trace(),
+    )
+
+
+def _format_repair_prompt(base_prompt: str, current_code: str, failing_assertions: list[str]) -> str:
+    failures = "\n".join(f"- {x}" for x in failing_assertions[:12])
+    return (
+        f"{base_prompt.rstrip()}\n\n"
+        "You previously produced code that failed these automatically generated tests:\n"
+        f"{failures}\n\n"
+        "Rewrite the solution so it satisfies these tests while preserving the requested function signature. "
+        "Return Python code only.\n\n"
+        "Previous code:\n"
+        f"{current_code}\n"
     )

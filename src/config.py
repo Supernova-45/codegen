@@ -53,6 +53,10 @@ class PipelineConfig:
     shared_test_pool_size: int
     shared_test_pool_regen_rounds: int
     sandbox_timeout_s: int
+    self_consistency_min_coverage: float
+    repair_rounds: int
+    query_scorer: str
+    hard_prune_update: bool
 
 
 @dataclass
@@ -61,6 +65,7 @@ class ExperimentConfig:
     seed: int
     max_examples: int
     shuffle: bool
+    benchmark: str
     variants_path: str
     conditions: list[str]
     mbppplus_enabled: bool
@@ -96,6 +101,7 @@ def load_config(path: str) -> ExperimentConfig:
     pipeline = raw["pipeline"]
     output = raw["output"]
     dataset = raw["dataset"]
+    benchmark = str(dataset.get("benchmark", "mbpp")).strip().lower()
 
     mbppplus = dataset.get("mbppplus", {})
     mbppplus_enabled = bool(mbppplus.get("enabled", False))
@@ -167,6 +173,10 @@ def load_config(path: str) -> ExperimentConfig:
         shared_test_pool_size=max(1, int(pipeline.get("shared_test_pool_size", 64))),
         shared_test_pool_regen_rounds=max(0, int(pipeline.get("shared_test_pool_regen_rounds", 2))),
         sandbox_timeout_s=int(pipeline["sandbox_timeout_s"]),
+        self_consistency_min_coverage=float(pipeline.get("self_consistency_min_coverage", 0.6)),
+        repair_rounds=max(1, int(pipeline.get("repair_rounds", 2))),
+        query_scorer=str(pipeline.get("query_scorer", "eig")),
+        hard_prune_update=bool(pipeline.get("hard_prune_update", False)),
     )
 
     return ExperimentConfig(
@@ -174,6 +184,7 @@ def load_config(path: str) -> ExperimentConfig:
         seed=int(raw["seed"]),
         max_examples=int(raw["max_examples"]),
         shuffle=bool(raw["shuffle"]),
+        benchmark=benchmark,
         variants_path=str(dataset["variants_path"]),
         conditions=list(dataset["conditions"]),
         mbppplus_enabled=mbppplus_enabled,

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from config import ensure_output_path, load_config
+from data.humaneval_loader import load_variant_file as load_humaneval_variants
 from data.mbppplus_loader import load_mbppplus_tests
 from data.mbpp_loader import filter_tasks, load_variant_file
 from execution.adapter import build_effective_code
@@ -23,13 +24,41 @@ from models.openai_compatible import OpenAICompatibleClient
 from pipeline.run_problem import run_problem
 
 
+def _split_env_list(raw: str) -> list[str]:
+    return [x.strip() for x in raw.replace(";", ",").replace(" ", ",").split(",") if x.strip()]
+
+
+def _resolve_api_key_pool(cli_env_names: list[str]) -> tuple[list[str], list[str], str]:
+    # Priority: explicit CLI list -> .env env-name list -> .env direct key pool.
+    env_names = list(cli_env_names)
+    source = "--api-key-env-pool"
+    if not env_names:
+        from_env_names = _split_env_list(os.environ.get("CLARIFYCODE_API_KEY_ENV_POOL", ""))
+        if from_env_names:
+            env_names = from_env_names
+            source = "CLARIFYCODE_API_KEY_ENV_POOL"
+    if env_names:
+        keys: list[str] = []
+        for env_name in env_names:
+            value = os.environ.get(env_name, "").strip()
+            if not value:
+                raise ValueError(f"API key env var '{env_name}' is missing or empty.")
+            keys.append(value)
+        return keys, env_names, source
+
+    pooled_keys = _split_env_list(os.environ.get("CLARIFYCODE_API_KEY_POOL", ""))
+    if pooled_keys:
+        return pooled_keys, [], "CLARIFYCODE_API_KEY_POOL"
+    return [], [], ""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument(
         "--strategies",
         nargs="+",
-        default=["one-shot", "random-tests", "eig-tests"],
+        default=["one-shot", "random-tests", "eig-tests", "self-consistency", "repair"],
     )
     parser.add_argument("--output-file")
     parser.add_argument("--pipeline-overrides", nargs="*", default=[])
@@ -60,13 +89,10 @@ def main() -> None:
         raise ValueError("--num-shards must be >= 1")
     if args.shard_index < 0 or args.shard_index >= args.num_shards:
         raise ValueError("--shard-index must be in [0, --num-shards)")
-    resolved_pool_keys: list[str] = []
-    if args.api_key_env_pool:
-        for env_name in args.api_key_env_pool:
-            value = os.environ.get(env_name, "").strip()
-            if not value:
-                raise ValueError(f"API key env var '{env_name}' is missing or empty.")
-            resolved_pool_keys.append(value)
+    resolved_pool_keys, resolved_pool_env_names, pool_source = _resolve_api_key_pool(
+        args.api_key_env_pool
+    )
+    if resolved_pool_keys:
         # load_config validates CLARIFYCODE_API_KEY; seed it from pool so config loading succeeds.
         os.environ["CLARIFYCODE_API_KEY"] = resolved_pool_keys[0]
     cfg = load_config(args.config)
@@ -78,19 +104,25 @@ def main() -> None:
     if resolved_pool_keys:
         if args.num_shards > 1:
             selected_idx = args.shard_index % len(resolved_pool_keys)
-            selected_env = args.api_key_env_pool[selected_idx]
             shard_api_keys = [resolved_pool_keys[selected_idx]]
             cfg.model.api_key = shard_api_keys[0]
-            print(
-                f"Shard {args.shard_index + 1}/{args.num_shards} pinned to API key from "
-                f"${selected_env}"
-            )
+            if resolved_pool_env_names:
+                selected_env = resolved_pool_env_names[selected_idx]
+                print(
+                    f"Shard {args.shard_index + 1}/{args.num_shards} pinned to API key from "
+                    f"${selected_env} ({pool_source})"
+                )
+            else:
+                print(
+                    f"Shard {args.shard_index + 1}/{args.num_shards} pinned to pooled key "
+                    f"index {selected_idx + 1}/{len(resolved_pool_keys)} ({pool_source})"
+                )
         else:
             shard_api_keys = resolved_pool_keys
             cfg.model.api_key = shard_api_keys[0]
             print(
                 f"Single process rotating across {len(shard_api_keys)} API keys "
-                f"from --api-key-env-pool"
+                f"from {pool_source}"
             )
     for raw in args.pipeline_overrides:
         if "=" not in raw:
@@ -110,7 +142,12 @@ def main() -> None:
         setattr(cfg.pipeline, key, parsed)
     random.seed(cfg.seed)
 
-    all_tasks = load_variant_file(cfg.variants_path)
+    if cfg.benchmark == "humaneval":
+        all_tasks = load_humaneval_variants(cfg.variants_path)
+    elif cfg.benchmark == "mbpp":
+        all_tasks = load_variant_file(cfg.variants_path)
+    else:
+        raise ValueError(f"Unsupported dataset benchmark: {cfg.benchmark}")
     tasks = filter_tasks(
         all_tasks,
         conditions=cfg.conditions,
@@ -128,7 +165,7 @@ def main() -> None:
     output_path = ensure_output_path(cfg)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     mbppplus_by_task: dict[int, str] = {}
-    if cfg.mbppplus_enabled:
+    if cfg.mbppplus_enabled and cfg.benchmark == "mbpp":
         mbppplus_rows = load_mbppplus_tests(
             dataset=cfg.mbppplus_dataset,
             split=cfg.mbppplus_split,
@@ -148,7 +185,7 @@ def main() -> None:
                     cfg=cfg.pipeline,
                     seed=cfg.seed,
                 )
-                if cfg.mbppplus_enabled:
+                if cfg.mbppplus_enabled and cfg.benchmark == "mbpp":
                     mbppplus_script = mbppplus_by_task.get(task.task_id)
                     if mbppplus_script:
                         effective_mbpp_code, _ = build_effective_code(
