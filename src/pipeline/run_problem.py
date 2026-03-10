@@ -81,6 +81,7 @@ def run_problem(
         "ticode-tests",
         "self-consistency",
         "repair",
+        "hybrid-tests",
     }:
         raise ValueError(f"Unsupported strategy: {strategy}")
     if cfg.query_scorer not in {"eig", "ticode"}:
@@ -255,7 +256,23 @@ def run_problem(
             effective_candidates=effective_candidates,
             candidate_adapters=candidate_adapters,
         )
-    
+    if strategy == "hybrid-tests":
+        from pipeline.hybrid_strategy import run_hybrid_tests  # noqa: PLC0415
+
+        return run_hybrid_tests(
+            task=task,
+            cfg=cfg,
+            model=model,
+            usage=usage,
+            interaction_trace=interaction_trace,
+            signature_hint=signature_hint,
+            expected_arity=expected_arity,
+            test_arity=test_arity,
+            candidates=candidates,
+            effective_candidates=effective_candidates,
+            candidate_adapters=candidate_adapters,
+        )
+
     posterior = ParticlePosterior.uniform(candidates)
     asked_constraints: list[tuple[str, bool]] = []
     asked_details: list[dict[str, Any]] = []
