@@ -1,0 +1,4 @@
+strategy,n,pass_at_1,avg_total_tokens,avg_questions,pareto_efficient
+eig-tests,1,0.0,9657,1,False
+one-shot,1,0.0,358,0,True
+random-tests,1,0.0,11129,4,False

@@ -1,0 +1,4 @@
+condition,strategy,avg_total_tokens,median_total_tokens
+original,eig-tests,9657,9657
+original,one-shot,358,358
+original,random-tests,11129,11129

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Optional, Sequence
 
-TestOutcome = bool | None
+TestOutcome = Optional[bool]
 
 
 @dataclass
@@ -40,8 +40,10 @@ class ParticlePosterior:
         undefined_likelihood: float = 1.0,
         hard_prune: bool = False,
     ) -> None:
+        if len(self.weights) != len(outcomes):
+            raise ValueError("Posterior weights and outcomes length mismatch.")
         new_weights: list[float] = []
-        for w, outcome in zip(self.weights, outcomes, strict=True):
+        for w, outcome in zip(self.weights, outcomes):
             if hard_prune and outcome is not None and outcome != observed:
                 new_weights.append(0.0)
                 continue
@@ -62,8 +64,10 @@ class ParticlePosterior:
         undefined_likelihood: float = 1.0,
         hard_prune: bool = False,
     ) -> float:
+        if len(self.weights) != len(outcomes):
+            raise ValueError("Posterior weights and outcomes length mismatch.")
         p_obs_true = 0.0
-        for w, outcome in zip(self.weights, outcomes, strict=True):
+        for w, outcome in zip(self.weights, outcomes):
             p_obs_true += w * self._likelihood_for_observation(
                 outcome,
                 observed=True,
@@ -97,8 +101,10 @@ class ParticlePosterior:
         undefined_likelihood: float,
         hard_prune: bool,
     ) -> list[float]:
+        if len(self.weights) != len(outcomes):
+            raise ValueError("Posterior weights and outcomes length mismatch.")
         ws: list[float] = []
-        for w, outcome in zip(self.weights, outcomes, strict=True):
+        for w, outcome in zip(self.weights, outcomes):
             if hard_prune and outcome is not None and outcome != observed:
                 ws.append(0.0)
                 continue

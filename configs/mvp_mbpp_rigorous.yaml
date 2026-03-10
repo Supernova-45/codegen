@@ -36,7 +36,7 @@ pipeline:
   enforce_test_signature_arity: true
   filter_non_discriminative: true
   min_eig_score: 0.02
-  max_test_regen_attempts: 6
+  max_test_regen_attempts: 2
   eig_questions_per_round: 1
   candidate_temperature: 0.7
   reprompt_temperature: 0.1

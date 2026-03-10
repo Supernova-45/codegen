@@ -6,20 +6,40 @@ set -euo pipefail
 #   bash scripts/run_full_6shards.sh mbpp
 #   bash scripts/run_full_6shards.sh humaneval
 #   bash scripts/run_full_6shards.sh both
+#   bash scripts/run_full_6shards.sh mbpp eig-only
+#   bash scripts/run_full_6shards.sh both eig-only
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 TARGET="${1:-both}"
+STRATEGY_PROFILE="${2:-all}"
 NUM_SHARDS="${NUM_SHARDS:-8}"
+RESUME_SHARDS="${RESUME_SHARDS:-1}"
+SKIP_MBPPPLUS="${SKIP_MBPPPLUS:-1}"
+SKIP_EXISTING_FILE="${SKIP_EXISTING_FILE:-}"
 
-STRATEGIES=(
-  one-shot
-  random-tests
-  eig-tests
-  self-consistency
-  repair
-)
+case "${STRATEGY_PROFILE}" in
+  all)
+    STRATEGIES=(
+      one-shot
+      random-tests
+      eig-tests
+      self-consistency
+      repair
+    )
+    ;;
+  eig-only)
+    STRATEGIES=(
+      eig-tests
+    )
+    ;;
+  *)
+    echo "Unknown strategy profile: ${STRATEGY_PROFILE}"
+    echo "Usage: bash scripts/run_full_6shards.sh [mbpp|humaneval|both] [all|eig-only]"
+    exit 2
+    ;;
+esac
 
 run_dataset() {
   local dataset="$1"
@@ -30,18 +50,34 @@ run_dataset() {
 
   echo ""
   echo "== Running ${dataset} with ${NUM_SHARDS} shards =="
+  echo "== Strategies: ${STRATEGIES[*]} =="
   mkdir -p results/shards
 
   local pids=()
   for ((i=0; i<NUM_SHARDS; i++)); do
     local shard_out="shards/${shard_prefix}_shard${i}.jsonl"
     echo "Launching shard ${i}/${NUM_SHARDS} -> results/${shard_out}"
+    local resume_flag=()
+    if [[ "${RESUME_SHARDS}" == "1" ]]; then
+      resume_flag=(--resume)
+    fi
+    local mbppplus_flag=()
+    if [[ "${SKIP_MBPPPLUS}" == "1" ]]; then
+      mbppplus_flag=(--skip-mbppplus)
+    fi
+    local skip_existing_flag=()
+    if [[ -n "${SKIP_EXISTING_FILE}" ]]; then
+      skip_existing_flag=(--skip-existing-files "${SKIP_EXISTING_FILE}")
+    fi
     python scripts/run_experiment.py \
       --config "${config}" \
       --strategies "${STRATEGIES[@]}" \
       --num-shards "${NUM_SHARDS}" \
       --shard-index "${i}" \
-      --output-file "${shard_out}" &
+      --output-file "${shard_out}" \
+      "${mbppplus_flag[@]}" \
+      "${skip_existing_flag[@]}" \
+      "${resume_flag[@]}" &
     pids+=("$!")
   done
 
@@ -105,7 +141,7 @@ case "${TARGET}" in
     ;;
   *)
     echo "Unknown target: ${TARGET}"
-    echo "Usage: bash scripts/run_full_6shards.sh [mbpp|humaneval|both]"
+    echo "Usage: bash scripts/run_full_6shards.sh [mbpp|humaneval|both] [all|eig-only]"
     exit 2
     ;;
 esac

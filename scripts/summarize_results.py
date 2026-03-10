@@ -128,24 +128,27 @@ def bootstrap_pass_at_1(rows: list[dict]) -> list[dict]:
 
 
 def cost_efficiency_summary(rows: list[dict]) -> list[dict]:
-    grouped: dict[tuple[str, str], list[dict]] = {}
+    grouped: dict[tuple[str, str, str], list[dict]] = {}
     for row in rows:
-        grouped.setdefault((row["condition"], row["strategy"]), []).append(row)
-    one_shot_by_condition: dict[str, float] = {}
-    for (condition, strategy), items in grouped.items():
-        if strategy != "one-shot":
-            continue
-        one_shot_by_condition[condition] = sum(1 if x["pass_at_1"] else 0 for x in items) / len(items)
+        grouped.setdefault(("condition", str(row["condition"]), str(row["strategy"])), []).append(row)
+        grouped.setdefault(("overall", "all", str(row["strategy"])), []).append(row)
+    one_shot_baseline: dict[tuple[str, str], float] = {}
+    for (scope, condition, strategy), items in grouped.items():
+        if strategy == "one-shot":
+            one_shot_baseline[(scope, condition)] = (
+                sum(1 if x["pass_at_1"] else 0 for x in items) / len(items)
+            )
     out: list[dict] = []
-    for (condition, strategy), items in sorted(grouped.items()):
+    for (scope, condition, strategy), items in sorted(grouped.items()):
         p = sum(1 if x["pass_at_1"] else 0 for x in items) / len(items)
         avg_tokens = statistics.mean(
             int(x.get("total_prompt_tokens", 0)) + int(x.get("total_completion_tokens", 0))
             for x in items
         )
-        baseline = one_shot_by_condition.get(condition, 0.0)
+        baseline = one_shot_baseline.get((scope, condition), 0.0)
         out.append(
             {
+                "scope": scope,
                 "condition": condition,
                 "strategy": strategy,
                 "n": len(items),
@@ -163,11 +166,12 @@ def cost_efficiency_summary(rows: list[dict]) -> list[dict]:
 
 def fixed_budget_pass_summary(rows: list[dict], budgets: list[int] | None = None) -> list[dict]:
     budgets = budgets or [500, 1000, 2000, 4000, 8000]
-    grouped: dict[tuple[str, str], list[dict]] = {}
+    grouped: dict[tuple[str, str, str], list[dict]] = {}
     for row in rows:
-        grouped.setdefault((row["condition"], row["strategy"]), []).append(row)
+        grouped.setdefault(("condition", str(row["condition"]), str(row["strategy"])), []).append(row)
+        grouped.setdefault(("overall", "all", str(row["strategy"])), []).append(row)
     out: list[dict] = []
-    for (condition, strategy), items in sorted(grouped.items()):
+    for (scope, condition, strategy), items in sorted(grouped.items()):
         with_tokens = [
             (
                 int(x.get("total_prompt_tokens", 0)) + int(x.get("total_completion_tokens", 0)),
@@ -179,6 +183,7 @@ def fixed_budget_pass_summary(rows: list[dict], budgets: list[int] | None = None
             eligible = [p for tok, p in with_tokens if tok <= budget]
             out.append(
                 {
+                    "scope": scope,
                     "condition": condition,
                     "strategy": strategy,
                     "budget_tokens": budget,
@@ -249,6 +254,10 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 "filtered_non_discriminative": 0.0,
                 "filtered_universal_runtime_error": 0.0,
                 "filtered_low_defined_coverage": 0.0,
+                "filtered_low_candidate_coverage": 0.0,
+                "filtered_timeout": 0.0,
+                "filtered_non_deterministic": 0.0,
+                "filtered_other_invalid": 0.0,
                 "filtered_signature_mismatch": 0.0,
                 "filtered_keyword_arguments": 0.0,
                 "filtered_extra_function_calls": 0.0,
@@ -300,6 +309,21 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                     stats["filtered_universal_runtime_error"] += 1
                 if tv.get("invalid_reason") == "low_defined_coverage":
                     stats["filtered_low_defined_coverage"] += 1
+                if tv.get("invalid_reason") == "low_candidate_coverage":
+                    stats["filtered_low_candidate_coverage"] += 1
+                if tv.get("invalid_reason") == "timeout":
+                    stats["filtered_timeout"] += 1
+                if tv.get("invalid_reason") == "non_deterministic":
+                    stats["filtered_non_deterministic"] += 1
+                if tv.get("invalid_reason") not in {
+                    "non_discriminative",
+                    "universal_runtime_error",
+                    "low_defined_coverage",
+                    "low_candidate_coverage",
+                    "timeout",
+                    "non_deterministic",
+                }:
+                    stats["filtered_other_invalid"] += 1
             if step.get("decision") == "ask_and_update":
                 stats["selected_tests"] += 1
                 sel_score = step.get("selected_test_score")
@@ -336,6 +360,10 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 "filtered_non_discriminative": int(s["filtered_non_discriminative"]),
                 "filtered_universal_runtime_error": int(s["filtered_universal_runtime_error"]),
                 "filtered_low_defined_coverage": int(s["filtered_low_defined_coverage"]),
+                "filtered_low_candidate_coverage": int(s["filtered_low_candidate_coverage"]),
+                "filtered_timeout": int(s["filtered_timeout"]),
+                "filtered_non_deterministic": int(s["filtered_non_deterministic"]),
+                "filtered_other_invalid": int(s["filtered_other_invalid"]),
                 "filtered_signature_mismatch": int(s["filtered_signature_mismatch"]),
                 "filtered_keyword_arguments": int(s["filtered_keyword_arguments"]),
                 "filtered_extra_function_calls": int(s["filtered_extra_function_calls"]),
@@ -350,6 +378,11 @@ def eig_diagnostics(rows: list[dict]) -> list[dict]:
                 "test_redundancy_rate": 1.0
                 - (s["generated_unique_total"] / max(1.0, s["generated_tests_total"])),
                 "invalid_test_rate": s["invalid_tests_total"] / max(1.0, s["generated_tests_total"]),
+                "invalid_timeout_rate": s["filtered_timeout"] / max(1.0, s["generated_tests_total"]),
+                "invalid_non_deterministic_rate": s["filtered_non_deterministic"]
+                / max(1.0, s["generated_tests_total"]),
+                "invalid_non_discriminative_rate": s["filtered_non_discriminative"]
+                / max(1.0, s["generated_tests_total"]),
             }
         )
     return out

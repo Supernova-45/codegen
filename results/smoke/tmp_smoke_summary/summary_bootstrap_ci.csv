@@ -1,0 +1,7 @@
+scope,condition,strategy,n,pass_at_1,ci95_low,ci95_high
+condition,original,eig-tests,1,0.0,0.0,0.0
+condition,original,one-shot,1,0.0,0.0,0.0
+condition,original,random-tests,1,0.0,0.0,0.0
+overall,all,eig-tests,1,0.0,0.0,0.0
+overall,all,one-shot,1,0.0,0.0,0.0
+overall,all,random-tests,1,0.0,0.0,0.0

@@ -10,7 +10,8 @@ from data.mbpp_loader import infer_signature_hint
 from data.task_schema import BenchmarkTask
 from execution.adapter import build_effective_code
 from execution.sandbox import run_assertion, run_tests
-from models.openai_compatible import OpenAICompatibleClient, Usage
+from models.client_protocol import ModelClient
+from models.openai_compatible import Usage
 from posterior.particle_posterior import ParticlePosterior, TestOutcome
 from query.ask_or_submit import should_ask
 from query.eig_selector import select_max_eig
@@ -62,7 +63,7 @@ class ProblemResult:
 def run_problem(
     task: BenchmarkTask,
     strategy: str,
-    model: OpenAICompatibleClient,
+    model: ModelClient,
     cfg: PipelineConfig,
     seed: int,
 ) -> ProblemResult:
@@ -713,7 +714,7 @@ def _score_tests_for_strategy(
 
 def _build_shared_test_pool(
     task: BenchmarkTask,
-    model: OpenAICompatibleClient,
+    model: ModelClient,
     cfg: PipelineConfig,
     usage: Usage,
     signature_hint: str | None,
@@ -762,7 +763,9 @@ def _build_shared_test_pool(
         )
         all_eval_logs.extend(test_eval_logs)
         unique_added = 0
-        for test, outcomes in zip(valid_tests, outcomes_by_test, strict=True):
+        if len(valid_tests) != len(outcomes_by_test):
+            raise ValueError("valid_tests and outcomes_by_test length mismatch in shared pool.")
+        for test, outcomes in zip(valid_tests, outcomes_by_test):
             key = test.strip()
             if key in seen_tests:
                 continue
@@ -796,7 +799,9 @@ def _remove_tests_from_pool(
         return tests, outcomes
     keep_tests: list[str] = []
     keep_outcomes: list[list[TestOutcome]] = []
-    for test, outcome in zip(tests, outcomes, strict=True):
+    if len(tests) != len(outcomes):
+        raise ValueError("tests and outcomes length mismatch in shared pool.")
+    for test, outcome in zip(tests, outcomes):
         if test in remove_tests:
             continue
         keep_tests.append(test)
@@ -940,7 +945,7 @@ def _ticode_rank_alive_by_passing_tests(
 def _run_ticode_tests(
     task: BenchmarkTask,
     cfg: PipelineConfig,
-    model: OpenAICompatibleClient,
+    model: ModelClient,
     usage: Usage,
     interaction_trace: list[dict[str, Any]],
     signature_hint: str | None,
@@ -1117,7 +1122,7 @@ def _run_ticode_tests(
 def _run_self_consistency_baseline(
     task: BenchmarkTask,
     cfg: PipelineConfig,
-    model: OpenAICompatibleClient,
+    model: ModelClient,
     usage: Usage,
     interaction_trace: list[dict[str, Any]],
     signature_hint: str | None,
@@ -1198,7 +1203,7 @@ def _run_self_consistency_baseline(
 def _run_repair_baseline(
     task: BenchmarkTask,
     cfg: PipelineConfig,
-    model: OpenAICompatibleClient,
+    model: ModelClient,
     usage: Usage,
     interaction_trace: list[dict[str, Any]],
     signature_hint: str | None,

@@ -1,0 +1,3 @@
+condition,strategy,avg_total_tokens,median_total_tokens
+original,one-shot,358,358
+original,random-tests,3112,3112

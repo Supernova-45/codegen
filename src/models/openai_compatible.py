@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+import os
 import random
 import re
 import time
@@ -29,6 +30,11 @@ class OpenAICompatibleClient:
         normalized_keys = [k.strip() for k in (api_keys or []) if k and k.strip()]
         self._api_keys = normalized_keys if normalized_keys else [cfg.api_key]
         self._key_cursor = 0
+        self._min_request_interval_s = max(
+            0.0,
+            float(os.environ.get("CLARIFYCODE_MIN_REQUEST_INTERVAL_S", "0")),
+        )
+        self._last_request_started_at = 0.0
 
     def clear_trace(self) -> None:
         self._trace_events = []
@@ -42,6 +48,7 @@ class OpenAICompatibleClient:
         temperature: float | None = None,
         meta: dict[str, Any] | None = None,
     ) -> tuple[str, Usage]:
+        request_started_at = time.time()
         payload: dict[str, Any] = {
             "model": self.cfg.model,
             "messages": messages,
@@ -52,6 +59,7 @@ class OpenAICompatibleClient:
         attempts: list[dict[str, Any]] = []
         for attempt in range(max_attempts):
             key_slot, api_key = self._acquire_api_key()
+            self._apply_request_spacing()
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -93,7 +101,13 @@ class OpenAICompatibleClient:
                     sleep_s = min(30.0, float(2**attempt) + random.uniform(0.0, 0.5))
                 time.sleep(sleep_s)
                 continue
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                error_preview = resp.text[:1500]
+                attempts[-1]["error_body_preview"] = error_preview
+                raise requests.HTTPError(
+                    f"{resp.status_code} response from model endpoint: {error_preview}",
+                    response=resp,
+                )
             data = resp.json()
             break
         if data is None:
@@ -103,6 +117,7 @@ class OpenAICompatibleClient:
         self._trace_events.append(
             {
                 "kind": "chat_completion",
+                "request_started_at_unix_s": request_started_at,
                 "meta": meta or {},
                 "request": {
                     "url": f"{self.cfg.base_url.rstrip('/')}/chat/completions",
@@ -126,6 +141,16 @@ class OpenAICompatibleClient:
             prompt_tokens=int(usage.get("prompt_tokens", 0)),
             completion_tokens=int(usage.get("completion_tokens", 0)),
         )
+
+    def _apply_request_spacing(self) -> None:
+        if self._min_request_interval_s <= 0.0:
+            return
+        now = time.monotonic()
+        wait_s = self._min_request_interval_s - (now - self._last_request_started_at)
+        if wait_s > 0:
+            time.sleep(wait_s)
+            now = time.monotonic()
+        self._last_request_started_at = now
 
     def _acquire_api_key(self) -> tuple[int, str]:
         slot = self._key_cursor % len(self._api_keys)

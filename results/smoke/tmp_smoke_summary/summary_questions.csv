@@ -1,0 +1,4 @@
+condition,strategy,avg_questions
+original,eig-tests,1.0
+original,one-shot,0.0
+original,random-tests,4.0

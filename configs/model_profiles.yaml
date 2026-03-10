@@ -1,0 +1,43 @@
+profiles:
+  modal_qwen_only:
+    description: "Modal-hosted Qwen for both code and test generation."
+    env:
+      CLARIFYCODE_BASE_URL: "${MODAL_BASE_URL}"
+      CLARIFYCODE_API_KEY: "${MODAL_API_KEY}"
+      CLARIFYCODE_MODEL: "${MODAL_QWEN_CHEAP_MODEL}"
+      CLARIFYCODE_MIN_REQUEST_INTERVAL_S: "0.05"
+
+  modal_qwen_cheap_groq_tests:
+    description: "Cheap generation on Modal Qwen, test generation on Groq Llama."
+    env:
+      CLARIFYCODE_BASE_URL: "${MODAL_BASE_URL}"
+      CLARIFYCODE_API_KEY: "${MODAL_API_KEY}"
+      CLARIFYCODE_MODEL: "${MODAL_QWEN_CHEAP_MODEL}"
+      CLARIFYCODE_TESTGEN_BASE_URL: "${GROQ_BASE_URL}"
+      CLARIFYCODE_TESTGEN_API_KEY: "${GROQ_API_KEY}"
+      CLARIFYCODE_TESTGEN_MODEL: "${GROQ_LLAMA_TEST_MODEL}"
+      CLARIFYCODE_MIN_REQUEST_INTERVAL_S: "0.15"
+
+  openai_large:
+    description: "Strong OpenAI comparator."
+    env:
+      CLARIFYCODE_BASE_URL: "https://api.openai.com/v1"
+      CLARIFYCODE_API_KEY: "${OPENAI_API_KEY}"
+      CLARIFYCODE_MODEL: "${OPENAI_LARGE_MODEL}"
+      CLARIFYCODE_MIN_REQUEST_INTERVAL_S: "0.1"
+
+  openai_mid:
+    description: "Lower-cost OpenAI comparator."
+    env:
+      CLARIFYCODE_BASE_URL: "https://api.openai.com/v1"
+      CLARIFYCODE_API_KEY: "${OPENAI_API_KEY}"
+      CLARIFYCODE_MODEL: "${OPENAI_MID_MODEL}"
+      CLARIFYCODE_MIN_REQUEST_INTERVAL_S: "0.1"
+
+  google_large_openai_compat:
+    description: "Strong Google comparator via an OpenAI-compatible endpoint."
+    env:
+      CLARIFYCODE_BASE_URL: "${GOOGLE_OPENAI_BASE_URL}"
+      CLARIFYCODE_API_KEY: "${GOOGLE_OPENAI_API_KEY}"
+      CLARIFYCODE_MODEL: "${GOOGLE_LARGE_MODEL}"
+      CLARIFYCODE_MIN_REQUEST_INTERVAL_S: "0.1"

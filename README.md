@@ -62,6 +62,7 @@ Optional:
 - `CLARIFYCODE_BASE_URL` (defaults to OpenAI public endpoint)
 - `CLARIFYCODE_API_KEY_ENV_POOL` (comma-separated env var names, e.g. `GROK_KEY_1,...,GROK_KEY_6`)
 - `CLARIFYCODE_API_KEY_POOL` (comma-separated raw keys)
+- `CLARIFYCODE_TESTGEN_API_KEY` / `CLARIFYCODE_TESTGEN_BASE_URL` / `CLARIFYCODE_TESTGEN_MODEL` (optional separate model for test generation)
 
 If `--api-key-env-pool` is not provided, `scripts/run_experiment.py` auto-loads keys from `.env` in this order:
 1. `CLARIFYCODE_API_KEY_ENV_POOL`
@@ -110,6 +111,48 @@ HumanEval run:
 python scripts/run_experiment.py --config configs/mvp_humaneval.yaml
 ```
 
+Optional split-model routing (cheap codegen + stronger testgen):
+
+```bash
+export CLARIFYCODE_BASE_URL="https://your-modal-openai-endpoint/v1"
+export CLARIFYCODE_API_KEY="${MODAL_API_KEY}"
+export CLARIFYCODE_MODEL="${MODAL_QWEN_CHEAP_MODEL}"
+export CLARIFYCODE_TESTGEN_BASE_URL="https://api.groq.com/openai/v1"
+export CLARIFYCODE_TESTGEN_API_KEY="${GROQ_API_KEY}"
+export CLARIFYCODE_TESTGEN_MODEL="${GROQ_LLAMA_TEST_MODEL}"
+python scripts/run_experiment.py --config configs/mvp_mbpp_rigorous.yaml
+```
+
+### Modal-Only Qwen Setup
+
+If you want to avoid Groq and call Qwen through Modal only:
+
+1. Deploy the included endpoint:
+
+```bash
+bash scripts/deploy_modal_qwen.sh qwen25-7b-openai
+```
+
+This deploys [`modal_qwen_openai_server.py`](modal_qwen_openai_server.py), which serves:
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+2. Put the endpoint URL in `.env`:
+
+```bash
+MODAL_OPENAI_BASE_URL=https://<your-endpoint>.modal.run
+CLARIFYCODE_BASE_URL=https://<your-endpoint>.modal.run/v1
+MODAL_BASE_URL=https://<your-endpoint>.modal.run/v1
+CLARIFYCODE_API_KEY=dummy
+MODAL_API_KEY=dummy
+CLARIFYCODE_MODEL=Qwen/Qwen2.5-7B-Instruct
+MODAL_QWEN_CHEAP_MODEL=Qwen/Qwen2.5-7B-Instruct
+```
+
+Cost-efficiency note:
+- default GPU is `L4` (`MODAL_QWEN_GPU`, in `modal_qwen_openai_server.py`).
+- if your workload is very small, keep one endpoint and use small `max_tokens` in calls.
+
 Sharded run using key pool from `.env` (no CLI key flags needed):
 
 ```bash
@@ -133,6 +176,14 @@ EIG tuning knobs in `pipeline`:
 - `hard_prune_update`: hard candidate elimination instead of soft posterior reweighting
 - `repair_rounds`: number of generate->test->repair rounds in repair baseline
 - `self_consistency_min_coverage`: minimum defined-outcome coverage for self-consistency test scoring
+
+Definitions used in scoring/update:
+- TiCoder `G+`: candidate programs that pass a candidate test (within the currently alive set).
+- TiCoder `G-`: candidate programs that fail a candidate test (within the currently alive set).
+- TiCoder score here is `min(|G+|, |G-|) / max(|G+|, |G-|)` (0 if either group is empty).
+- `epsilon`: oracle noise rate used in Bayesian update likelihoods for observed boolean outcomes.
+- `gamma`: ask-discount in the VOI rule (`ask` iff `gamma * E[max posterior] > current max posterior`).
+- `hard_prune_update`: if `true`, candidates inconsistent with a defined observed answer are zeroed out immediately; if `false`, they are softly down-weighted by `epsilon`.
 
 ## Summarize Results
 
@@ -165,6 +216,53 @@ python scripts/run_ablation_sweeps.py \
   --config configs/mvp_mbpp_rigorous.yaml \
   --execute
 ```
+
+## EIG Hyperparameter Optimization
+
+Run token-aware random search to maximize EIG over one-shot/random baselines:
+
+```bash
+python scripts/optimize_eig.py \
+  --config configs/mvp_mbpp_rigorous.yaml \
+  --num-trials 24 \
+  --max-examples 240 \
+  --token-budget 8000
+```
+
+Outputs include:
+- `leaderboard.csv`
+- `best_overrides.json`
+- `best_overrides.txt`
+
+Then run full evaluation with the chosen overrides:
+
+```bash
+python scripts/run_experiment.py \
+  --config configs/mvp_mbpp_eig_vs_random_tuned_full.yaml \
+  --strategies one-shot random-tests eig-tests self-consistency repair \
+  --pipeline-overrides $(cat results/eig_tuning/<run_id>/best_overrides.txt)
+```
+
+## Cross-Model Matrix (Cheap vs Strong)
+
+`scripts/run_model_matrix.py` executes sharded full runs for multiple model profiles and writes a combined comparison table.
+
+1) Fill variables referenced in `configs/model_profiles.yaml` (`MODAL_*`, `GROQ_*`, `OPENAI_*`, and optional `GOOGLE_*`).
+2) Run:
+
+```bash
+python scripts/run_model_matrix.py \
+  --profiles modal_qwen_only openai_large google_large_openai_compat \
+  --datasets mbpp humaneval \
+  --num-shards 8 \
+  --parallel-shards \
+  --resume
+```
+
+Main outputs:
+- `results/model_matrix/<run_id>/model_comparison.csv`
+- `results/model_matrix/<run_id>/model_comparison.md`
+- `results/model_matrix/<run_id>/model_budget_comparison.csv`
 
 ## Reporting Checklist
 

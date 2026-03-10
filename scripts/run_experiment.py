@@ -8,19 +8,21 @@ from pathlib import Path
 import random
 import sys
 import time
+from typing import Iterable, Optional
 
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from config import ensure_output_path, load_config
+from config import ModelConfig, ensure_output_path, load_config
 from data.humaneval_loader import load_variant_file as load_humaneval_variants
 from data.mbppplus_loader import load_mbppplus_tests
 from data.mbpp_loader import filter_tasks, load_variant_file
 from execution.adapter import build_effective_code
 from execution.sandbox import run_test_script
 from models.openai_compatible import OpenAICompatibleClient
+from models.routed_client import RoutedModelClient
 from pipeline.run_problem import run_problem
 
 
@@ -52,6 +54,25 @@ def _resolve_api_key_pool(cli_env_names: list[str]) -> tuple[list[str], list[str
     return [], [], ""
 
 
+def _optional_testgen_model_cfg(primary: ModelConfig) -> ModelConfig | None:
+    testgen_api_key = os.environ.get("CLARIFYCODE_TESTGEN_API_KEY", "").strip()
+    if not testgen_api_key:
+        return None
+    base_url = os.environ.get("CLARIFYCODE_TESTGEN_BASE_URL", "").strip() or primary.base_url
+    model_name = os.environ.get("CLARIFYCODE_TESTGEN_MODEL", "").strip() or primary.model
+    timeout_raw = os.environ.get("CLARIFYCODE_TESTGEN_REQUEST_TIMEOUT_S", "").strip()
+    temperature_raw = os.environ.get("CLARIFYCODE_TESTGEN_TEMPERATURE", "").strip()
+    timeout_s = int(timeout_raw) if timeout_raw else primary.request_timeout_s
+    temperature = float(temperature_raw) if temperature_raw else primary.temperature
+    return ModelConfig(
+        base_url=base_url,
+        api_key=testgen_api_key,
+        model=model_name,
+        temperature=temperature,
+        request_timeout_s=timeout_s,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -61,6 +82,26 @@ def main() -> None:
         default=["one-shot", "random-tests", "eig-tests", "self-consistency", "repair"],
     )
     parser.add_argument("--output-file")
+    parser.add_argument(
+        "--max-examples",
+        type=int,
+        default=0,
+        help="Optional override for config.max_examples (0 keeps config value).",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Append to output file and skip already-completed rows found in it.",
+    )
+    parser.add_argument(
+        "--skip-existing-files",
+        nargs="*",
+        default=[],
+        help=(
+            "Optional JSONL result files to scan for completed (strategy, task_id, condition) "
+            "rows and skip re-running them."
+        ),
+    )
     parser.add_argument("--pipeline-overrides", nargs="*", default=[])
     parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0)
@@ -98,9 +139,11 @@ def main() -> None:
     cfg = load_config(args.config)
     if args.output_file:
         cfg.output_file = args.output_file
+    if args.max_examples > 0:
+        cfg.max_examples = args.max_examples
     if args.skip_mbppplus:
         cfg.mbppplus_enabled = False
-    shard_api_keys: list[str] | None = None
+    shard_api_keys: Optional[list[str]] = None
     if resolved_pool_keys:
         if args.num_shards > 1:
             selected_idx = args.shard_index % len(resolved_pool_keys)
@@ -161,9 +204,21 @@ def main() -> None:
             f"Shard {args.shard_index + 1}/{args.num_shards}: "
             f"{len(tasks)} tasks selected after sharding"
         )
-    model = OpenAICompatibleClient(cfg.model, api_keys=shard_api_keys)
+    codegen_client = OpenAICompatibleClient(cfg.model, api_keys=shard_api_keys)
+    testgen_cfg = _optional_testgen_model_cfg(cfg.model)
+    testgen_client = OpenAICompatibleClient(testgen_cfg) if testgen_cfg else None
+    model = RoutedModelClient(code_client=codegen_client, test_client=testgen_client)
+    if testgen_cfg:
+        print(
+            "Using separate test-generation model: "
+            f"{testgen_cfg.model} @ {testgen_cfg.base_url}"
+        )
     output_path = ensure_output_path(cfg)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    completed_keys = _load_completed_keys(
+        [output_path] if args.resume else [],
+        extra_paths=[Path(x) for x in args.skip_existing_files],
+    )
     mbppplus_by_task: dict[int, str] = {}
     if cfg.mbppplus_enabled and cfg.benchmark == "mbpp":
         mbppplus_rows = load_mbppplus_tests(
@@ -174,9 +229,13 @@ def main() -> None:
         print(f"Loaded {len(mbppplus_by_task)} MBPP+ tasks from {cfg.mbppplus_dataset}/{cfg.mbppplus_split}")
 
     run_count = 0
-    with output_path.open("w", encoding="utf-8") as f:
+    mode = "a" if args.resume else "w"
+    with output_path.open(mode, encoding="utf-8") as f:
         for strategy in args.strategies:
             for task in tasks:
+                key = _result_key(strategy=strategy, task_id=task.task_id, condition=task.condition)
+                if key in completed_keys:
+                    continue
                 run_started_at = time.perf_counter()
                 result = run_problem(
                     task=task,
@@ -205,19 +264,68 @@ def main() -> None:
                         result.mbppplus_pass_at_1 = None
                         result.mbppplus_error = "TaskMissingInMBPPPlus"
                 run_elapsed_s = time.perf_counter() - run_started_at
-                f.write(json.dumps(result.to_dict()) + "\n")
+                result_row = result.to_dict()
+                result_row["codegen_model"] = cfg.model.model
+                result_row["codegen_base_url"] = cfg.model.base_url
+                if testgen_cfg:
+                    result_row["testgen_model"] = testgen_cfg.model
+                    result_row["testgen_base_url"] = testgen_cfg.base_url
+                else:
+                    result_row["testgen_model"] = None
+                    result_row["testgen_base_url"] = None
+                f.write(json.dumps(result_row) + "\n")
                 f.flush()
                 run_count += 1
+                completed_keys.add(key)
                 if args.live_profiler:
                     _print_live_profile(
                         run_count=run_count,
-                        result=result.to_dict(),
+                        result=result_row,
                         run_elapsed_s=run_elapsed_s,
                     )
                 if run_count % 10 == 0:
                     print(f"Completed {run_count} runs")
 
     print(f"Saved results to {output_path}")
+
+
+def _result_key(strategy: str, task_id: int, condition: str) -> tuple[str, int, str]:
+    return (strategy, int(task_id), str(condition))
+
+
+def _load_completed_keys(
+    primary_paths: Iterable[Path],
+    extra_paths: Optional[Iterable[Path]] = None,
+) -> set[tuple[str, int, str]]:
+    keys: set[tuple[str, int, str]] = set()
+    paths = list(primary_paths) + list(extra_paths or [])
+    seen_paths: set[Path] = set()
+    for path in paths:
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    row = json.loads(s)
+                except json.JSONDecodeError:
+                    # Ignore truncated/corrupt lines from interrupted runs.
+                    continue
+                strategy = row.get("strategy")
+                task_id = row.get("task_id")
+                condition = row.get("condition")
+                if strategy is None or task_id is None or condition is None:
+                    continue
+                try:
+                    keys.add(_result_key(strategy=str(strategy), task_id=int(task_id), condition=str(condition)))
+                except (TypeError, ValueError):
+                    continue
+    return keys
 
 
 def _print_live_profile(run_count: int, result: dict[str, object], run_elapsed_s: float) -> None:

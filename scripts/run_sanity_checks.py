@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from config import PipelineConfig
-from data.mbpp_loader import MBPPTask
+from data.task_schema import BenchmarkTask
 from execution.sandbox import run_assertion
 from posterior.particle_posterior import ParticlePosterior
 from query.eig_selector import select_max_eig
@@ -179,13 +179,19 @@ def _base_cfg() -> PipelineConfig:
         shared_test_pool=False,
         shared_test_pool_size=32,
         shared_test_pool_regen_rounds=1,
+        self_consistency_min_coverage=0.6,
+        repair_rounds=2,
+        query_scorer="eig",
+        hard_prune_update=False,
         sandbox_timeout_s=3,
     )
 
 
-def _task() -> MBPPTask:
-    return MBPPTask(
+def _task() -> BenchmarkTask:
+    return BenchmarkTask(
+        benchmark="mbpp",
         task_id=999001,
+        task_key="999001",
         condition="original",
         prompt="Write foo.",
         oracle_code="def foo(x):\n    return 1\n",

@@ -58,9 +58,11 @@ def _weighted_defined_pass_probability(
     posterior: ParticlePosterior,
     outcomes: list[bool | None],
 ) -> float:
+    if len(posterior.weights) != len(outcomes):
+        raise ValueError("Posterior weights and outcomes length mismatch.")
     numerator = 0.0
     denominator = 0.0
-    for w, out in zip(posterior.weights, outcomes, strict=True):
+    for w, out in zip(posterior.weights, outcomes):
         if out is None:
             continue
         denominator += w
@@ -75,8 +77,10 @@ def _defined_weight(
     posterior: ParticlePosterior,
     outcomes: list[bool | None],
 ) -> float:
+    if len(posterior.weights) != len(outcomes):
+        raise ValueError("Posterior weights and outcomes length mismatch.")
     weight = 0.0
-    for w, out in zip(posterior.weights, outcomes, strict=True):
+    for w, out in zip(posterior.weights, outcomes):
         if out is not None:
             weight += w
     return max(0.0, min(1.0, weight))

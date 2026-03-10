@@ -1,0 +1,69 @@
+experiment_name: mvp_mbpp_eig_gap_tuned
+seed: 42
+max_examples: 100000
+shuffle: false
+
+dataset:
+  benchmark: mbpp
+  variants_path: data/mbpp_variants.jsonl
+  conditions:
+    - original
+    - incomplete
+    - ambiguous
+    - contradictory
+  mbppplus:
+    enabled: true
+    dataset: evalplus/mbppplus
+    split: test
+    timeout_s: 15
+
+model:
+  base_url_env: CLARIFYCODE_BASE_URL
+  api_key_env: CLARIFYCODE_API_KEY
+  model_env: CLARIFYCODE_MODEL
+  temperature: 0.8
+  request_timeout_s: 90
+
+pipeline:
+  strategy: eig-tests
+  # Keep request load moderate to avoid 429, but keep enough posterior diversity.
+  n_candidates: 10
+  tests_per_round: 12
+  # Let EIG ask more than current partial runs (2.1 avg) to close ambiguous gap.
+  k_max: 4
+  epsilon: 0.02
+  gamma: 0.97
+  min_questions_if_valid: 3
+  # Prefer executable tests to avoid undefined oracle outcomes.
+  min_valid_candidate_coverage: 0.8
+  enforce_test_signature_arity: true
+  filter_non_discriminative: true
+  # Keep floor moderate so asking does not collapse to zero.
+  min_eig_score: 0.025
+  max_test_regen_attempts: 3
+  eig_questions_per_round: 1
+  candidate_temperature: 0.75
+  reprompt_temperature: 0.1
+  eval_with_adapter: true
+  run_reprompt: true
+  reprompt_min_questions: 2
+  reprompt_require_mixed_outcomes: false
+  reprompt_max_false_rate: 0.8
+  reprompt_max_runtime_error_rate: 0.5
+  reprompt_min_constraint_match_rate: 0.67
+  eig_discriminative_weight: 0.7
+  eig_runtime_error_penalty: 1.0
+  undefined_outcome_likelihood: 0.2
+  assertion_determinism_repeats: 2
+  skip_posterior_update_on_undefined_oracle: true
+  disable_voi_stop: false
+  force_full_question_budget: false
+  self_consistency_min_coverage: 0.6
+  repair_rounds: 2
+  query_scorer: eig
+  hard_prune_update: false
+  sandbox_timeout_s: 3
+
+output:
+  results_dir: results
+  output_file: mbpp_eig_gap_tuned.jsonl
