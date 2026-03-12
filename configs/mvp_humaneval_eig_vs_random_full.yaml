@@ -23,27 +23,27 @@ model:
   api_key_env: CLARIFYCODE_API_KEY
   model_env: CLARIFYCODE_MODEL
   temperature: 0.8
-  request_timeout_s: 90
+  request_timeout_s: 240
 
 pipeline:
   strategy: eig-tests
-  # Slightly lighter than MBPP full to keep runtime practical.
-  n_candidates: 18
-  tests_per_round: 18
-  k_max: 4
+  # Balanced HumanEval profile for Modal throughput.
+  n_candidates: 10
+  tests_per_round: 10 
+  k_max: 2
   epsilon: 0.02
-  gamma: 0.93
-  min_questions_if_valid: 2
-  min_valid_candidate_coverage: 0.72
+  gamma: 0.85
+  min_questions_if_valid: 1
+  min_valid_candidate_coverage: 0.65
   enforce_test_signature_arity: true
   filter_non_discriminative: true
-  min_eig_score: 0.03
-  max_test_regen_attempts: 5
+  min_eig_score: 0.02
+  max_test_regen_attempts: 2
   eig_questions_per_round: 1
-  candidate_temperature: 0.75
+  candidate_temperature: 0.8
   reprompt_temperature: 0.1
   eval_with_adapter: true
-  run_reprompt: true
+  run_reprompt: false
   reprompt_min_questions: 1
   reprompt_require_mixed_outcomes: false
   reprompt_max_false_rate: 0.8
@@ -56,6 +56,9 @@ pipeline:
   skip_posterior_update_on_undefined_oracle: true
   disable_voi_stop: false
   force_full_question_budget: false
+  shared_test_pool: true
+  shared_test_pool_size: 20
+  shared_test_pool_regen_rounds: 2
   self_consistency_min_coverage: 0.6
   repair_rounds: 2
   query_scorer: eig

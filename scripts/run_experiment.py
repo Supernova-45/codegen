@@ -215,6 +215,7 @@ def main() -> None:
         )
     output_path = ensure_output_path(cfg)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Writing results to {output_path}")
     completed_keys = _load_completed_keys(
         [output_path] if args.resume else [],
         extra_paths=[Path(x) for x in args.skip_existing_files],
@@ -275,6 +276,7 @@ def main() -> None:
                     result_row["testgen_base_url"] = None
                 f.write(json.dumps(result_row) + "\n")
                 f.flush()
+                os.fsync(f.fileno())
                 run_count += 1
                 completed_keys.add(key)
                 if args.live_profiler:

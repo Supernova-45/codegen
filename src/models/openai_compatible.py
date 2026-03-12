@@ -35,6 +35,12 @@ class OpenAICompatibleClient:
             float(os.environ.get("CLARIFYCODE_MIN_REQUEST_INTERVAL_S", "0")),
         )
         self._last_request_started_at = 0.0
+        self._codegen_max_tokens = _parse_positive_int_env("CLARIFYCODE_CODEGEN_MAX_TOKENS")
+        self._testgen_max_tokens = _parse_positive_int_env("CLARIFYCODE_TESTGEN_MAX_TOKENS")
+        self._max_request_attempts = max(
+            1,
+            int(os.environ.get("CLARIFYCODE_MAX_REQUEST_ATTEMPTS", "4")),
+        )
 
     def clear_trace(self) -> None:
         self._trace_events = []
@@ -46,6 +52,7 @@ class OpenAICompatibleClient:
         self,
         messages: list[dict[str, str]],
         temperature: float | None = None,
+        max_tokens: int | None = None,
         meta: dict[str, Any] | None = None,
     ) -> tuple[str, Usage]:
         request_started_at = time.time()
@@ -54,8 +61,10 @@ class OpenAICompatibleClient:
             "messages": messages,
             "temperature": self.cfg.temperature if temperature is None else temperature,
         }
+        if max_tokens is not None and max_tokens > 0:
+            payload["max_tokens"] = max_tokens
         data: dict[str, Any] | None = None
-        max_attempts = 6
+        max_attempts = self._max_request_attempts
         attempts: list[dict[str, Any]] = []
         for attempt in range(max_attempts):
             key_slot, api_key = self._acquire_api_key()
@@ -123,6 +132,7 @@ class OpenAICompatibleClient:
                     "url": f"{self.cfg.base_url.rstrip('/')}/chat/completions",
                     "model": payload["model"],
                     "temperature": payload["temperature"],
+                    "max_tokens": payload.get("max_tokens"),
                     "messages": messages,
                 },
                 "attempts": attempts,
@@ -203,6 +213,7 @@ class OpenAICompatibleClient:
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=temperature,
+                max_tokens=self._codegen_max_tokens,
                 meta={
                     "call_type": "generate_code_candidate",
                     "candidate_index": idx,
@@ -258,6 +269,7 @@ class OpenAICompatibleClient:
                     ),
                 },
             ],
+            max_tokens=self._testgen_max_tokens,
             meta={
                 "call_type": "generate_candidate_tests",
                 "requested_n_tests": n_tests,
@@ -276,6 +288,19 @@ class OpenAICompatibleClient:
         stats["assert_lines"] = len(asserts)
         stats["accepted"] = min(n_tests, len(filtered))
         return filtered[:n_tests], usage, stats
+
+
+def _parse_positive_int_env(name: str) -> int | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    return value
 
 
 def extract_python(text: str) -> str:

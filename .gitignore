@@ -2,10 +2,12 @@
 __pycache__/
 *.pyc
 .env
-results/*.jsonl
-results/*.csv
-results/*/*.jsonl
-results/*/*.csv
+results
+googlevenv/
 logs/
 data/mbpp_variants.jsonl
 .DS_Store
+*.bib
+*.tex
+*.log
+figures/

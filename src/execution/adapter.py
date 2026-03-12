@@ -50,7 +50,8 @@ def build_effective_code(
             selected_arity=None,
             adapter_failed_reason="adapter_disabled",
         )
-    parsed, parse_error = _parse_module(code)
+    sanitized_code = _sanitize_generated_code(code)
+    parsed, parse_error = _parse_module(sanitized_code)
     if parsed is None:
         return code, AdapterInfo(
             adapter_applied=True,
@@ -88,7 +89,7 @@ def build_effective_code(
             adapter_failed_reason="ambiguous_or_unfit_candidate",
         )
     if selected.name == expected_function_name:
-        return code, AdapterInfo(
+        return sanitized_code, AdapterInfo(
             adapter_applied=True,
             adapter_success=True,
             expected_function_name=expected_function_name,
@@ -112,7 +113,7 @@ def build_effective_code(
             selected_arity=selected.arity,
             adapter_failed_reason="arity_mismatch_no_varargs_adapter",
         )
-    effective = f"{code.rstrip()}\n\n{wrapper}\n"
+    effective = f"{sanitized_code.rstrip()}\n\n{wrapper}\n"
     return effective, AdapterInfo(
         adapter_applied=True,
         adapter_success=True,
@@ -129,6 +130,28 @@ def _parse_module(code: str) -> tuple[ast.Module | None, str]:
         return ast.parse(code, mode="exec"), ""
     except SyntaxError as exc:
         return None, repr(exc)
+
+
+def _sanitize_generated_code(code: str) -> str:
+    stripped = code.strip()
+    if not stripped.startswith("```"):
+        return code
+
+    lines = stripped.splitlines()
+    if not lines:
+        return code
+
+    first = lines[0].strip()
+    if not first.startswith("```"):
+        return code
+
+    if len(lines) == 1:
+        return ""
+
+    body = lines[1:]
+    if body and body[-1].strip() == "```":
+        body = body[:-1]
+    return "\n".join(body).strip() + ("\n" if body else "")
 
 
 def _collect_top_level_callables(tree: ast.Module) -> list[_CallableDef]:

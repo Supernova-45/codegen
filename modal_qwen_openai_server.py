@@ -9,6 +9,8 @@ import modal
 APP_NAME = os.environ.get("MODAL_APP_NAME", "qwen25-7b-openai")
 MODEL_ID = os.environ.get("QWEN_MODEL_ID", "Qwen/Qwen2.5-7B-Instruct")
 GPU_TYPE = os.environ.get("MODAL_QWEN_GPU", "L4")
+MAX_CONTAINERS = int(os.environ.get("MODAL_QWEN_MAX_CONTAINERS", "6"))
+BUFFER_CONTAINERS = int(os.environ.get("MODAL_QWEN_BUFFER_CONTAINERS", "1"))
 
 app = modal.App(APP_NAME)
 image = (
@@ -27,6 +29,8 @@ image = (
 @app.function(
     image=image,
     gpu=GPU_TYPE,
+    max_containers=MAX_CONTAINERS,
+    buffer_containers=BUFFER_CONTAINERS,
     timeout=900,
 )
 @modal.asgi_app()

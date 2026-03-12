@@ -111,6 +111,20 @@ HumanEval run:
 python scripts/run_experiment.py --config configs/mvp_humaneval.yaml
 ```
 
+Local Vertex Gemini one-shot run:
+
+```bash
+bash scripts/run_google_humaneval_oneshot.sh 20
+```
+
+This starts a local OpenAI-compatible proxy backed by Vertex Gemini using
+`GCP_PROJECT_NAME` from `.env`, defaults to `GEMINI_VERTEX_MODEL=gemini-3-pro-preview`,
+and writes summarized results under `results/`.
+For code generation, the wrapper sets `CLARIFYCODE_CODEGEN_MAX_TOKENS=10000` by default.
+Thinking is left at model default unless you set `GEMINI_VERTEX_THINKING_BUDGET`.
+The wrapper uses `configs/mvp_humaneval_google_oneshot.yaml` (request timeout 600s)
+to reduce `ReadTimeout` failures on long responses.
+
 Optional split-model routing (cheap codegen + stronger testgen):
 
 ```bash

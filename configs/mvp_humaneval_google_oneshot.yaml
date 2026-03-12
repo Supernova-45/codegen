@@ -1,18 +1,18 @@
-experiment_name: mvp_mbpp_rigorous
+experiment_name: mvp_humaneval_google_oneshot
 seed: 42
-max_examples: 120
+max_examples: 80
 shuffle: false
 
 dataset:
-  benchmark: mbpp
-  variants_path: data/mbpp_variants.jsonl
+  benchmark: humaneval
+  variants_path: data/humaneval_variants.jsonl
   conditions:
     - original
     - incomplete
     - ambiguous
     - contradictory
   mbppplus:
-    enabled: true
+    enabled: false
     dataset: evalplus/mbppplus
     split: test
     timeout_s: 15
@@ -22,38 +22,42 @@ model:
   api_key_env: CLARIFYCODE_API_KEY
   model_env: CLARIFYCODE_MODEL
   temperature: 0.8
-  request_timeout_s: 45
+  # Google long generations can exceed the default 120s.
+  request_timeout_s: 600
 
 pipeline:
   strategy: eig-tests
-  n_candidates: 16
-  tests_per_round: 16
-  k_max: 4
+  n_candidates: 8
+  tests_per_round: 6
+  k_max: 2
   epsilon: 0.02
-  gamma: 0.85
+  gamma: 0.9
   min_questions_if_valid: 1
-  min_valid_candidate_coverage: 0.6
+  min_valid_candidate_coverage: 0.65
   enforce_test_signature_arity: true
   filter_non_discriminative: true
   min_eig_score: 0.02
   max_test_regen_attempts: 2
   eig_questions_per_round: 1
-  candidate_temperature: 0.7
+  candidate_temperature: 0.8
   reprompt_temperature: 0.1
   eval_with_adapter: true
-  run_reprompt: true
-  reprompt_min_questions: 2
-  reprompt_require_mixed_outcomes: true
-  reprompt_max_false_rate: 0.75
-  reprompt_max_runtime_error_rate: 0.25
-  reprompt_min_constraint_match_rate: 0.75
-  eig_discriminative_weight: 0.5
-  eig_runtime_error_penalty: 0.6
-  undefined_outcome_likelihood: 0.85
+  run_reprompt: false
+  reprompt_min_questions: 1
+  reprompt_require_mixed_outcomes: false
+  reprompt_max_false_rate: 0.8
+  reprompt_max_runtime_error_rate: 0.5
+  reprompt_min_constraint_match_rate: 0.67
+  eig_discriminative_weight: 0.65
+  eig_runtime_error_penalty: 0.85
+  undefined_outcome_likelihood: 0.3
   assertion_determinism_repeats: 2
   skip_posterior_update_on_undefined_oracle: true
   disable_voi_stop: false
   force_full_question_budget: false
+  shared_test_pool: true
+  shared_test_pool_size: 18
+  shared_test_pool_regen_rounds: 1
   self_consistency_min_coverage: 0.6
   repair_rounds: 2
   query_scorer: eig
@@ -62,4 +66,4 @@ pipeline:
 
 output:
   results_dir: results
-  output_file: mbpp_rigorous_latest.jsonl
+  output_file: humaneval_google_oneshot_latest.jsonl

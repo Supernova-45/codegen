@@ -68,9 +68,23 @@ def parse_args() -> argparse.Namespace:
         help="Optional smaller max_examples for baseline run only (0 uses --max-examples).",
     )
     parser.add_argument(
+        "--baseline-overrides",
+        nargs="*",
+        default=[],
+        help=(
+            "Optional pipeline key=value overrides for the baseline run "
+            "(one-shot + random-tests), e.g. n_candidates=8 tests_per_round=6."
+        ),
+    )
+    parser.add_argument(
         "--fast-search-space",
         action="store_true",
         help="Sample a smaller, cheaper EIG hyperparameter space.",
+    )
+    parser.add_argument(
+        "--reuse-baseline",
+        action="store_true",
+        help="Reuse baseline artifacts if they already exist under --run-id.",
     )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -351,19 +365,27 @@ def main() -> None:
 
     baseline_jsonl = run_root / "baseline.jsonl"
     baseline_summary = run_root / "baseline_summary"
-    print("\n=== Baseline run (one-shot + random-tests) ===")
-    _run_and_summarize(
-        config=args.config,
-        strategies=["one-shot", "random-tests"],
-        output_jsonl=baseline_jsonl,
-        summary_dir=baseline_summary,
-        max_examples=baseline_examples,
-        overrides=None,
-        num_shards=args.num_shards,
-        parallel_shards=args.parallel_shards,
-        skip_mbppplus=bool(args.skip_mbppplus),
-        dry_run=bool(args.dry_run),
-    )
+    baseline_summary_csv = baseline_summary / "summary_overall_strategy.csv"
+    should_reuse_baseline = bool(args.reuse_baseline and baseline_summary_csv.exists())
+    if should_reuse_baseline:
+        print(
+            "\n=== Baseline run skipped (reusing existing artifacts) ===\n"
+            f"Using: {baseline_summary_csv}"
+        )
+    else:
+        print("\n=== Baseline run (one-shot + random-tests) ===")
+        _run_and_summarize(
+            config=args.config,
+            strategies=["one-shot", "random-tests"],
+            output_jsonl=baseline_jsonl,
+            summary_dir=baseline_summary,
+            max_examples=baseline_examples,
+            overrides=list(args.baseline_overrides) if args.baseline_overrides else None,
+            num_shards=args.num_shards,
+            parallel_shards=args.parallel_shards,
+            skip_mbppplus=bool(args.skip_mbppplus),
+            dry_run=bool(args.dry_run),
+        )
 
     if args.dry_run:
         print(f"\nDry run complete. Planned outputs under: {run_root}")
