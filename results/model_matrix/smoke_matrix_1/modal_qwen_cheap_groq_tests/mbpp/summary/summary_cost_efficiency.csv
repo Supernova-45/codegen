@@ -1,5 +1,0 @@
-scope,condition,strategy,n,pass_at_1,avg_total_tokens,pass_per_1k_tokens,delta_pass_vs_oneshot,delta_pass_per_1k_tokens_vs_oneshot
-condition,original,one-shot,1,0.0,359,0.0,0.0,0.0
-condition,original,random-tests,1,0.0,4135,0.0,0.0,0.0
-overall,all,one-shot,1,0.0,359,0.0,0.0,0.0
-overall,all,random-tests,1,0.0,4135,0.0,0.0,0.0
