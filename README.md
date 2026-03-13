@@ -43,31 +43,19 @@ python scripts/prepare_humaneval_variants.py --output data/humaneval_variants.js
 
 ## Run Experiments
 
-MBPP:
+MBPP scored on MBPP+:
 
 ```bash
 python scripts/run_experiment.py --config configs/mvp_mbpp.yaml
 ```
 
-HumanEval:
-
-```bash
-python scripts/run_experiment.py --config configs/mvp_humaneval.yaml
-```
-
-HumanEval with HumanEval+ re-scoring:
+HumanEval scored on HumanEval+:
 
 ```bash
 python scripts/run_experiment.py --config configs/mvp_humaneval.yaml --enable-humanevalplus
 ```
 
-Google Vertex one-shot wrapper:
-
-```bash
-bash scripts/run_google_humaneval_oneshot.sh 20
-```
-
-Google wrapper with HumanEval+ re-scoring:
+Gemini wrapper scored on HumanEval+:
 
 ```bash
 ENABLE_HUMANEVALPLUS=1 bash scripts/run_google_humaneval_oneshot.sh 20
@@ -81,3 +69,6 @@ python scripts/summarize_results.py \
   --output-dir results
 ```
 
+Then look at:
+- `results/summary_mbppplus_pass_at_1.csv`
+- `results/summary_humanevalplus_pass_at_1.csv`
