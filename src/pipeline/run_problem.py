@@ -37,6 +37,8 @@ class ProblemResult:
     mbppplus_error: str | None
     interaction_trace: list[dict[str, Any]]
     model_trace: list[dict[str, Any]]
+    humanevalplus_pass_at_1: bool | None = None
+    humanevalplus_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +57,8 @@ class ProblemResult:
             "adapter_info": self.adapter_info,
             "mbppplus_pass_at_1": self.mbppplus_pass_at_1,
             "mbppplus_error": self.mbppplus_error,
+            "humanevalplus_pass_at_1": self.humanevalplus_pass_at_1,
+            "humanevalplus_error": self.humanevalplus_error,
             "interaction_trace": self.interaction_trace,
             "model_trace": self.model_trace,
         }

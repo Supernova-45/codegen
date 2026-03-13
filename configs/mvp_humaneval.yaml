@@ -16,6 +16,11 @@ dataset:
     dataset: evalplus/mbppplus
     split: test
     timeout_s: 15
+  humanevalplus:
+    enabled: false
+    dataset: evalplus/humanevalplus
+    split: test
+    timeout_s: 15
 
 model:
   base_url_env: CODEGEN_BASE_URL

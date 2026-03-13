@@ -23,8 +23,8 @@ DEFAULT_STRATEGIES = [
     "repair",
 ]
 DEFAULT_CONFIGS = {
-    "mbpp": ROOT / "configs" / "mvp_mbpp_eig_vs_random_tuned_full.yaml",
-    "humaneval": ROOT / "configs" / "mvp_humaneval_eig_vs_random_full.yaml",
+    "mbpp": ROOT / "configs" / "mvp_mbpp.yaml",
+    "humaneval": ROOT / "configs" / "mvp_humaneval.yaml",
 }
 ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 

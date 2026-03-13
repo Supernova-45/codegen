@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from config import ModelConfig, ensure_output_path, load_config
 from data.humaneval_loader import load_variant_file as load_humaneval_variants
+from data.humanevalplus_loader import load_humanevalplus_tests
 from data.mbppplus_loader import load_mbppplus_tests
 from data.mbpp_loader import filter_tasks, load_variant_file
 from execution.adapter import build_effective_code
@@ -125,6 +126,16 @@ def main() -> None:
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--skip-mbppplus", action="store_true")
     parser.add_argument(
+        "--skip-humanevalplus",
+        action="store_true",
+        help="Disable HumanEval+ re-scoring even if enabled in config.",
+    )
+    parser.add_argument(
+        "--enable-humanevalplus",
+        action="store_true",
+        help="Enable HumanEval+ re-scoring for HumanEval benchmark runs.",
+    )
+    parser.add_argument(
         "--live-profiler",
         action="store_true",
         help=(
@@ -148,6 +159,8 @@ def main() -> None:
         raise ValueError("--num-shards must be >= 1")
     if args.shard_index < 0 or args.shard_index >= args.num_shards:
         raise ValueError("--shard-index must be in [0, --num-shards)")
+    if args.skip_humanevalplus and args.enable_humanevalplus:
+        raise ValueError("--skip-humanevalplus and --enable-humanevalplus are mutually exclusive.")
     resolved_pool_keys, resolved_pool_env_names, pool_source = _resolve_api_key_pool(
         args.api_key_env_pool
     )
@@ -161,6 +174,10 @@ def main() -> None:
         cfg.max_examples = args.max_examples
     if args.skip_mbppplus:
         cfg.mbppplus_enabled = False
+    if args.skip_humanevalplus:
+        cfg.humanevalplus_enabled = False
+    if args.enable_humanevalplus:
+        cfg.humanevalplus_enabled = True
     shard_api_keys: Optional[list[str]] = None
     if resolved_pool_keys:
         if args.num_shards > 1:
@@ -246,6 +263,19 @@ def main() -> None:
         )
         mbppplus_by_task = {task_id: row.test_script for task_id, row in mbppplus_rows.items()}
         print(f"Loaded {len(mbppplus_by_task)} MBPP+ tasks from {cfg.mbppplus_dataset}/{cfg.mbppplus_split}")
+    humanevalplus_by_task: dict[int, str] = {}
+    if cfg.humanevalplus_enabled and cfg.benchmark == "humaneval":
+        humanevalplus_rows = load_humanevalplus_tests(
+            dataset=cfg.humanevalplus_dataset,
+            split=cfg.humanevalplus_split,
+        )
+        humanevalplus_by_task = {
+            task_id: row.test_script for task_id, row in humanevalplus_rows.items()
+        }
+        print(
+            f"Loaded {len(humanevalplus_by_task)} HumanEval+ tasks from "
+            f"{cfg.humanevalplus_dataset}/{cfg.humanevalplus_split}"
+        )
 
     run_count = 0
     mode = "a" if args.resume else "w"
@@ -282,6 +312,27 @@ def main() -> None:
                     else:
                         result.mbppplus_pass_at_1 = None
                         result.mbppplus_error = "TaskMissingInMBPPPlus"
+                if cfg.humanevalplus_enabled and cfg.benchmark == "humaneval":
+                    humanevalplus_script = humanevalplus_by_task.get(task.task_id)
+                    if humanevalplus_script:
+                        effective_he_code, _ = build_effective_code(
+                            result.final_code,
+                            expected_function_name=task.function_name,
+                            expected_arity=None,
+                            enabled=cfg.pipeline.eval_with_adapter,
+                        )
+                        humanevalplus_ok, humanevalplus_err = run_test_script(
+                            effective_he_code,
+                            humanevalplus_script,
+                            cfg.humanevalplus_timeout_s,
+                        )
+                        result.humanevalplus_pass_at_1 = humanevalplus_ok
+                        result.humanevalplus_error = (
+                            "" if humanevalplus_ok else humanevalplus_err
+                        )
+                    else:
+                        result.humanevalplus_pass_at_1 = None
+                        result.humanevalplus_error = "TaskMissingInHumanEvalPlus"
                 run_elapsed_s = time.perf_counter() - run_started_at
                 result_row = result.to_dict()
                 result_row["codegen_model"] = cfg.model.model
@@ -353,6 +404,7 @@ def _print_live_profile(run_count: int, result: dict[str, object], run_elapsed_s
     interaction_trace = result.get("interaction_trace", [])
     eval_errors = result.get("eval_errors", [])
     mbppplus_error = str(result.get("mbppplus_error", ""))
+    humanevalplus_error = str(result.get("humanevalplus_error", ""))
     status_429 = 0
     timeout_count = 0
     for event in model_trace if isinstance(model_trace, list) else []:
@@ -379,6 +431,8 @@ def _print_live_profile(run_count: int, result: dict[str, object], run_elapsed_s
         if "Timeout" in str(err):
             timeout_count += 1
     if "Timeout" in mbppplus_error:
+        timeout_count += 1
+    if "Timeout" in humanevalplus_error:
         timeout_count += 1
     avg_round_s = run_elapsed_s / max(1, round_count)
     print(

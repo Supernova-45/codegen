@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run multi-shard full experiments, then merge + summarize.
+# Run multi-shard experiments, then merge + summarize.
 # Usage:
 #   bash scripts/run_full_6shards.sh mbpp
 #   bash scripts/run_full_6shards.sh humaneval
@@ -112,32 +112,32 @@ case "${TARGET}" in
   mbpp)
     run_dataset \
       "MBPP" \
-      "configs/mvp_mbpp_eig_vs_random_tuned_full.yaml" \
-      "results/mbpp_eig_vs_random_tuned_full.jsonl" \
-      "results/mbpp_eig_vs_random_tuned_full_summary" \
-      "mbpp_full"
+      "configs/mvp_mbpp.yaml" \
+      "results/mbpp_default.jsonl" \
+      "results/mbpp_default_summary" \
+      "mbpp_default"
     ;;
   humaneval)
     run_dataset \
       "HumanEval" \
-      "configs/mvp_humaneval_eig_vs_random_full.yaml" \
-      "results/humaneval_eig_vs_random_full.jsonl" \
-      "results/humaneval_eig_vs_random_full_summary" \
-      "humaneval_full"
+      "configs/mvp_humaneval.yaml" \
+      "results/humaneval_default.jsonl" \
+      "results/humaneval_default_summary" \
+      "humaneval_default"
     ;;
   both)
     run_dataset \
       "MBPP" \
-      "configs/mvp_mbpp_eig_vs_random_tuned_full.yaml" \
-      "results/mbpp_eig_vs_random_tuned_full.jsonl" \
-      "results/mbpp_eig_vs_random_tuned_full_summary" \
-      "mbpp_full"
+      "configs/mvp_mbpp.yaml" \
+      "results/mbpp_default.jsonl" \
+      "results/mbpp_default_summary" \
+      "mbpp_default"
     run_dataset \
       "HumanEval" \
-      "configs/mvp_humaneval_eig_vs_random_full.yaml" \
-      "results/humaneval_eig_vs_random_full.jsonl" \
-      "results/humaneval_eig_vs_random_full_summary" \
-      "humaneval_full"
+      "configs/mvp_humaneval.yaml" \
+      "results/humaneval_default.jsonl" \
+      "results/humaneval_default_summary" \
+      "humaneval_default"
     ;;
   *)
     echo "Unknown target: ${TARGET}"

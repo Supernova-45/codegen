@@ -37,6 +37,7 @@ RESULTS_FILE="${RESULTS_FILE:-results/google_humaneval_oneshot_${MAX_EXAMPLES}.j
 SUMMARY_DIR="${SUMMARY_DIR:-${RESULTS_FILE%.jsonl}_summary}"
 PROXY_LOG="${PROXY_LOG:-/tmp/gemini_vertex_proxy.log}"
 GOOGLE_EXPERIMENT_CONFIG="${GOOGLE_EXPERIMENT_CONFIG:-configs/mvp_humaneval_google_oneshot.yaml}"
+ENABLE_HUMANEVALPLUS="${ENABLE_HUMANEVALPLUS:-0}"
 
 "${PYTHON_BIN}" -m uvicorn servers.gemini_vertex_openai_server:app \
   --host "${GEMINI_VERTEX_HOST}" \
@@ -80,10 +81,16 @@ export CODEGEN_MODEL="${GEMINI_VERTEX_MODEL}"
 # Keep Google runs independent from any Modal-era token caps in .env.
 export CODEGEN_MAX_TOKENS="${GOOGLE_CODEGEN_MAX_TOKENS:-50000}"
 
+humanevalplus_flag=()
+if [[ "${ENABLE_HUMANEVALPLUS}" == "1" ]]; then
+  humanevalplus_flag=(--enable-humanevalplus)
+fi
+
 "${PYTHON_BIN}" scripts/run_experiment.py \
   --config "${GOOGLE_EXPERIMENT_CONFIG}" \
   --strategies one-shot \
   --max-examples "${MAX_EXAMPLES}" \
+  "${humanevalplus_flag[@]}" \
   --output-file "${RESULTS_FILE}"
 
 "${PYTHON_BIN}" scripts/summarize_results.py \

@@ -72,6 +72,10 @@ class ExperimentConfig:
     mbppplus_dataset: str
     mbppplus_split: str
     mbppplus_timeout_s: int
+    humanevalplus_enabled: bool
+    humanevalplus_dataset: str
+    humanevalplus_split: str
+    humanevalplus_timeout_s: int
     model: ModelConfig
     pipeline: PipelineConfig
     results_dir: str
@@ -118,6 +122,13 @@ def load_config(path: str) -> ExperimentConfig:
     mbppplus_dataset = str(mbppplus.get("dataset", "evalplus/mbppplus"))
     mbppplus_split = str(mbppplus.get("split", "test"))
     mbppplus_timeout_s = int(mbppplus.get("timeout_s", max(10, int(pipeline["sandbox_timeout_s"]))))
+    humanevalplus = dataset.get("humanevalplus", {})
+    humanevalplus_enabled = bool(humanevalplus.get("enabled", False))
+    humanevalplus_dataset = str(humanevalplus.get("dataset", "evalplus/humanevalplus"))
+    humanevalplus_split = str(humanevalplus.get("split", "test"))
+    humanevalplus_timeout_s = int(
+        humanevalplus.get("timeout_s", max(10, int(pipeline["sandbox_timeout_s"])))
+    )
 
     base_url_var = str(model["base_url_env"])
     api_key_var = str(model["api_key_env"])
@@ -201,6 +212,10 @@ def load_config(path: str) -> ExperimentConfig:
         mbppplus_dataset=mbppplus_dataset,
         mbppplus_split=mbppplus_split,
         mbppplus_timeout_s=mbppplus_timeout_s,
+        humanevalplus_enabled=humanevalplus_enabled,
+        humanevalplus_dataset=humanevalplus_dataset,
+        humanevalplus_split=humanevalplus_split,
+        humanevalplus_timeout_s=humanevalplus_timeout_s,
         model=model_cfg,
         pipeline=pipe_cfg,
         results_dir=str(output["results_dir"]),
