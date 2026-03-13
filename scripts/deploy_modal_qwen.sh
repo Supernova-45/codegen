@@ -11,9 +11,9 @@ if [[ ! -x ".venv/bin/python" ]]; then
   exit 1
 fi
 
-echo "Deploying Modal app '${APP_NAME}' from modal_qwen_openai_server.py ..."
+echo "Deploying Modal app '${APP_NAME}' from servers/modal_qwen_openai_server.py ..."
 DEPLOY_OUT="$(
-  .venv/bin/python -m modal deploy modal_qwen_openai_server.py --name "${APP_NAME}" 2>&1 || true
+  .venv/bin/python -m modal deploy servers/modal_qwen_openai_server.py --name "${APP_NAME}" 2>&1 || true
 )"
 echo "${DEPLOY_OUT}"
 
@@ -32,18 +32,20 @@ if [[ -n "${ENDPOINT}" ]]; then
   echo ""
   echo "Update your .env:"
   echo "  MODAL_OPENAI_BASE_URL=${ENDPOINT}"
-  echo "  CLARIFYCODE_BASE_URL=${ENDPOINT}/v1"
+  echo "  CODEGEN_BASE_URL=${ENDPOINT}/v1"
   echo "  MODAL_BASE_URL=${ENDPOINT}/v1"
+  echo "  CODEGEN_MODEL=Qwen/Qwen2.5-7B-Instruct"
 else
   echo ""
   echo "Could not auto-detect endpoint URL from deploy output."
   echo "Open Modal Dashboard and copy your endpoint URL, then set:"
   echo "  MODAL_OPENAI_BASE_URL=<endpoint>"
-  echo "  CLARIFYCODE_BASE_URL=<endpoint>/v1"
+  echo "  CODEGEN_BASE_URL=<endpoint>/v1"
   echo "  MODAL_BASE_URL=<endpoint>/v1"
+  echo "  CODEGEN_MODEL=Qwen/Qwen2.5-7B-Instruct"
 fi
 
 echo ""
 echo "Use dummy auth unless you add your own endpoint auth layer:"
-echo "  CLARIFYCODE_API_KEY=dummy"
+echo "  CODEGEN_API_KEY=dummy"
 echo "  MODAL_API_KEY=dummy"

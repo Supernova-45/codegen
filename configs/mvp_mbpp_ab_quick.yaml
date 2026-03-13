@@ -1,6 +1,6 @@
 experiment_name: mvp_mbpp_ab_quick
 seed: 42
-max_examples: 4 
+max_examples: 4
 shuffle: false
 
 dataset:
@@ -16,9 +16,9 @@ dataset:
     timeout_s: 15
 
 model:
-  base_url_env: CLARIFYCODE_BASE_URL
-  api_key_env: CLARIFYCODE_API_KEY
-  model_env: CLARIFYCODE_MODEL
+  base_url_env: CODEGEN_BASE_URL
+  api_key_env: CODEGEN_API_KEY
+  model_env: CODEGEN_MODEL
   temperature: 0.8
   request_timeout_s: 90
 

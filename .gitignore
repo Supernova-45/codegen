@@ -1,13 +1,25 @@
+# Python env and caches
 .venv/
+googlevenv/
 __pycache__/
 *.pyc
+.pycache_tmp/
+
+# Local secrets
 .env
-results
-googlevenv/
+
+# Experiment outputs
+results/
 logs/
+figures/
+*.log
+
+# Generated datasets
 data/mbpp_variants.jsonl
-.DS_Store
+
+# Local writing artifacts
 *.bib
 *.tex
-*.log
-figures/
+
+# OS files
+.DS_Store

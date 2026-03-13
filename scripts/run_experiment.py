@@ -26,6 +26,18 @@ from models.routed_client import RoutedModelClient
 from pipeline.run_problem import run_problem
 
 
+def _env_with_legacy(name: str) -> tuple[str, str]:
+    value = os.environ.get(name, "").strip()
+    if value:
+        return value, name
+    if name.startswith("CODEGEN_"):
+        legacy_name = f"CLARIFYCODE_{name[len('CODEGEN_'):]}"
+        legacy_value = os.environ.get(legacy_name, "").strip()
+        if legacy_value:
+            return legacy_value, legacy_name
+    return "", ""
+
+
 def _split_env_list(raw: str) -> list[str]:
     return [x.strip() for x in raw.replace(";", ",").replace(" ", ",").split(",") if x.strip()]
 
@@ -35,10 +47,11 @@ def _resolve_api_key_pool(cli_env_names: list[str]) -> tuple[list[str], list[str
     env_names = list(cli_env_names)
     source = "--api-key-env-pool"
     if not env_names:
-        from_env_names = _split_env_list(os.environ.get("CLARIFYCODE_API_KEY_ENV_POOL", ""))
+        raw_pool_names, source_name = _env_with_legacy("CODEGEN_API_KEY_ENV_POOL")
+        from_env_names = _split_env_list(raw_pool_names)
         if from_env_names:
             env_names = from_env_names
-            source = "CLARIFYCODE_API_KEY_ENV_POOL"
+            source = source_name
     if env_names:
         keys: list[str] = []
         for env_name in env_names:
@@ -48,20 +61,25 @@ def _resolve_api_key_pool(cli_env_names: list[str]) -> tuple[list[str], list[str
             keys.append(value)
         return keys, env_names, source
 
-    pooled_keys = _split_env_list(os.environ.get("CLARIFYCODE_API_KEY_POOL", ""))
+    raw_key_pool, source_name = _env_with_legacy("CODEGEN_API_KEY_POOL")
+    pooled_keys = _split_env_list(raw_key_pool)
     if pooled_keys:
-        return pooled_keys, [], "CLARIFYCODE_API_KEY_POOL"
+        return pooled_keys, [], source_name
     return [], [], ""
 
 
 def _optional_testgen_model_cfg(primary: ModelConfig) -> ModelConfig | None:
-    testgen_api_key = os.environ.get("CLARIFYCODE_TESTGEN_API_KEY", "").strip()
+    testgen_api_key, _ = _env_with_legacy("CODEGEN_TESTGEN_API_KEY")
     if not testgen_api_key:
         return None
-    base_url = os.environ.get("CLARIFYCODE_TESTGEN_BASE_URL", "").strip() or primary.base_url
-    model_name = os.environ.get("CLARIFYCODE_TESTGEN_MODEL", "").strip() or primary.model
-    timeout_raw = os.environ.get("CLARIFYCODE_TESTGEN_REQUEST_TIMEOUT_S", "").strip()
-    temperature_raw = os.environ.get("CLARIFYCODE_TESTGEN_TEMPERATURE", "").strip()
+    base_url, _ = _env_with_legacy("CODEGEN_TESTGEN_BASE_URL")
+    model_name, _ = _env_with_legacy("CODEGEN_TESTGEN_MODEL")
+    timeout_raw, _ = _env_with_legacy("CODEGEN_TESTGEN_REQUEST_TIMEOUT_S")
+    temperature_raw, _ = _env_with_legacy("CODEGEN_TESTGEN_TEMPERATURE")
+    if not base_url:
+        base_url = primary.base_url
+    if not model_name:
+        model_name = primary.model
     timeout_s = int(timeout_raw) if timeout_raw else primary.request_timeout_s
     temperature = float(temperature_raw) if temperature_raw else primary.temperature
     return ModelConfig(
@@ -134,8 +152,8 @@ def main() -> None:
         args.api_key_env_pool
     )
     if resolved_pool_keys:
-        # load_config validates CLARIFYCODE_API_KEY; seed it from pool so config loading succeeds.
-        os.environ["CLARIFYCODE_API_KEY"] = resolved_pool_keys[0]
+        # load_config validates CODEGEN_API_KEY; seed it from pool so config loading succeeds.
+        os.environ["CODEGEN_API_KEY"] = resolved_pool_keys[0]
     cfg = load_config(args.config)
     if args.output_file:
         cfg.output_file = args.output_file

@@ -38,7 +38,7 @@ SUMMARY_DIR="${SUMMARY_DIR:-${RESULTS_FILE%.jsonl}_summary}"
 PROXY_LOG="${PROXY_LOG:-/tmp/gemini_vertex_proxy.log}"
 GOOGLE_EXPERIMENT_CONFIG="${GOOGLE_EXPERIMENT_CONFIG:-configs/mvp_humaneval_google_oneshot.yaml}"
 
-"${PYTHON_BIN}" -m uvicorn gemini_vertex_openai_server:app \
+"${PYTHON_BIN}" -m uvicorn servers.gemini_vertex_openai_server:app \
   --host "${GEMINI_VERTEX_HOST}" \
   --port "${GEMINI_VERTEX_PORT}" \
   >"${PROXY_LOG}" 2>&1 &
@@ -74,11 +74,11 @@ print(f"Gemini proxy failed to start: {last_error}", file=sys.stderr)
 sys.exit(1)
 PY
 
-export CLARIFYCODE_BASE_URL="http://${GEMINI_VERTEX_HOST}:${GEMINI_VERTEX_PORT}/v1"
-export CLARIFYCODE_API_KEY="${CLARIFYCODE_API_KEY:-dummy}"
-export CLARIFYCODE_MODEL="${GEMINI_VERTEX_MODEL}"
+export CODEGEN_BASE_URL="http://${GEMINI_VERTEX_HOST}:${GEMINI_VERTEX_PORT}/v1"
+export CODEGEN_API_KEY="${CODEGEN_API_KEY:-${CLARIFYCODE_API_KEY:-dummy}}"
+export CODEGEN_MODEL="${GEMINI_VERTEX_MODEL}"
 # Keep Google runs independent from any Modal-era token caps in .env.
-export CLARIFYCODE_CODEGEN_MAX_TOKENS="${GOOGLE_CODEGEN_MAX_TOKENS:-50000}"
+export CODEGEN_MAX_TOKENS="${GOOGLE_CODEGEN_MAX_TOKENS:-50000}"
 
 "${PYTHON_BIN}" scripts/run_experiment.py \
   --config "${GOOGLE_EXPERIMENT_CONFIG}" \

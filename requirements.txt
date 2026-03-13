@@ -1,6 +1,6 @@
-PyYAML>=6.0
-requests>=2.32.0
-python-dotenv>=1.0.1
-google-genai>=1.47.0,<2
 fastapi>=0.116.1
+google-genai>=1.47.0,<2
+PyYAML>=6.0
+python-dotenv>=1.0.1
+requests>=2.32.0
 uvicorn>=0.35.0

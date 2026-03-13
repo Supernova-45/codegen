@@ -19,9 +19,9 @@ dataset:
     timeout_s: 15
 
 model:
-  base_url_env: CLARIFYCODE_BASE_URL
-  api_key_env: CLARIFYCODE_API_KEY
-  model_env: CLARIFYCODE_MODEL
+  base_url_env: CODEGEN_BASE_URL
+  api_key_env: CODEGEN_API_KEY
+  model_env: CODEGEN_MODEL
   temperature: 0.8
   request_timeout_s: 240
 
@@ -29,7 +29,7 @@ pipeline:
   strategy: eig-tests
   # Balanced HumanEval profile for Modal throughput.
   n_candidates: 10
-  tests_per_round: 10 
+  tests_per_round: 10
   k_max: 2
   epsilon: 0.02
   gamma: 0.85

@@ -79,13 +79,23 @@ class ExperimentConfig:
 
 
 def _must_env(var_name: str) -> str:
-    value = os.environ.get(var_name, "").strip()
+    value = _env_with_legacy(var_name)
     if not value:
         raise ValueError(
             f"Missing required environment variable: {var_name}. "
             "Create a .env file (see .env.example) or export it in your shell."
         )
     return value
+
+
+def _env_with_legacy(var_name: str) -> str:
+    value = os.environ.get(var_name, "").strip()
+    if value:
+        return value
+    if var_name.startswith("CODEGEN_"):
+        legacy_name = f"CLARIFYCODE_{var_name[len('CODEGEN_'):]}"
+        return os.environ.get(legacy_name, "").strip()
+    return ""
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -114,7 +124,7 @@ def load_config(path: str) -> ExperimentConfig:
     model_var = str(model["model_env"])
 
     model_cfg = ModelConfig(
-        base_url=os.environ.get(base_url_var, "https://api.openai.com/v1"),
+        base_url=_env_with_legacy(base_url_var) or "https://api.openai.com/v1",
         api_key=_must_env(api_key_var),
         model=_must_env(model_var),
         temperature=float(model["temperature"]),

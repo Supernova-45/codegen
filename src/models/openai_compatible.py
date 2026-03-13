@@ -32,14 +32,28 @@ class OpenAICompatibleClient:
         self._key_cursor = 0
         self._min_request_interval_s = max(
             0.0,
-            float(os.environ.get("CLARIFYCODE_MIN_REQUEST_INTERVAL_S", "0")),
+            _parse_nonnegative_float_env(
+                "CODEGEN_MIN_REQUEST_INTERVAL_S",
+                "CLARIFYCODE_MIN_REQUEST_INTERVAL_S",
+            ),
         )
         self._last_request_started_at = 0.0
-        self._codegen_max_tokens = _parse_positive_int_env("CLARIFYCODE_CODEGEN_MAX_TOKENS")
-        self._testgen_max_tokens = _parse_positive_int_env("CLARIFYCODE_TESTGEN_MAX_TOKENS")
+        self._codegen_max_tokens = _parse_positive_int_env(
+            "CODEGEN_MAX_TOKENS",
+            "CODEGEN_CODEGEN_MAX_TOKENS",
+            "CLARIFYCODE_CODEGEN_MAX_TOKENS",
+        )
+        self._testgen_max_tokens = _parse_positive_int_env(
+            "CODEGEN_TESTGEN_MAX_TOKENS",
+            "CLARIFYCODE_TESTGEN_MAX_TOKENS",
+        )
         self._max_request_attempts = max(
             1,
-            int(os.environ.get("CLARIFYCODE_MAX_REQUEST_ATTEMPTS", "4")),
+            _parse_positive_int_env(
+                "CODEGEN_MAX_REQUEST_ATTEMPTS",
+                "CLARIFYCODE_MAX_REQUEST_ATTEMPTS",
+            )
+            or 4,
         )
 
     def clear_trace(self) -> None:
@@ -290,17 +304,32 @@ class OpenAICompatibleClient:
         return filtered[:n_tests], usage, stats
 
 
-def _parse_positive_int_env(name: str) -> int | None:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return None
-    try:
-        value = int(raw)
-    except ValueError:
-        return None
-    if value <= 0:
-        return None
-    return value
+def _parse_positive_int_env(*names: str) -> int | None:
+    for name in names:
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+def _parse_nonnegative_float_env(*names: str) -> float:
+    for name in names:
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if value >= 0.0:
+            return value
+    return 0.0
 
 
 def extract_python(text: str) -> str:
